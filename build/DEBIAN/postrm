@@ -1,0 +1,64 @@
+#!/bin/bash
+set -e
+
+# Post-removal script for LightScope
+
+LIGHTSCOPE_USER="lightscope"
+LIGHTSCOPE_HOME="/opt/lightscope"
+SERVICE_NAME="lightscope"
+
+case "$1" in
+    remove|purge)
+        echo "Completely removing LightScope from system..."
+        
+        # Ensure service is completely stopped
+        if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            systemctl stop "$SERVICE_NAME" || true
+        fi
+        
+        # Remove service file if it exists
+        if [ -f "/lib/systemd/system/$SERVICE_NAME.service" ]; then
+            rm -f "/lib/systemd/system/$SERVICE_NAME.service"
+            systemctl daemon-reload || true
+        fi
+        
+        # Remove shared files
+        rm -rf /usr/share/lightscope || true
+        
+        # Always do complete cleanup (nuclear option by default)
+        echo "Removing LightScope data and user..."
+        
+        # Stop all processes owned by lightscope user
+        if id "$LIGHTSCOPE_USER" &>/dev/null; then
+            pkill -u "$LIGHTSCOPE_USER" || true
+            sleep 2
+            pkill -9 -u "$LIGHTSCOPE_USER" || true
+        fi
+        
+        # Remove the lightscope user and home directory
+        if id "$LIGHTSCOPE_USER" &>/dev/null; then
+            userdel -r "$LIGHTSCOPE_USER" 2>/dev/null || true
+        fi
+        
+        # Force remove the home directory if it still exists
+        if [ -d "$LIGHTSCOPE_HOME" ]; then
+            rm -rf "$LIGHTSCOPE_HOME" || true
+        fi
+        
+        # Remove any leftover log files
+        rm -rf /var/log/lightscope || true
+        
+        echo "LightScope completely removed from system."
+        ;;
+        
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # Do nothing for these cases
+        ;;
+        
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0 

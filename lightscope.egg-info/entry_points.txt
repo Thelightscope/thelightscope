@@ -1,0 +1,3 @@
+[console_scripts]
+lightscope = lightscope.lightscope:main
+lightscope_no_auto_update = lightscope.lightscope_core:lightscope_run

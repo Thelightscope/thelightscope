@@ -1,0 +1,65 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+ "http://www.w3.org/TR/html4/loose.dtd">
+<html><head>
+<title>3PCAP man page</title>
+<meta name="generator" content="roffit">
+<STYLE type="text/css">
+pre {
+  overflow: auto;
+  margin: 0;
+}
+
+P.level0, pre.level0 {
+ padding-left: 2em;
+}
+
+P.level1, pre.level1 {
+ padding-left: 4em;
+}
+
+P.level2, pre.level2 {
+ padding-left: 6em;
+}
+
+span.emphasis {
+ font-style: italic;
+}
+
+span.bold {
+ font-weight: bold;
+}
+
+span.manpage {
+ font-weight: bold;
+}
+
+h2.nroffsh {
+ background-color: #e0e0e0;
+}
+
+span.nroffip {
+ font-weight: bold;
+ font-size: 120%;
+ font-family: monospace;
+}
+
+p.roffit {
+ text-align: center;
+ font-size: 80%;
+}
+</STYLE>
+</head><body>
+<a name="NAME"></a><h2 class="nroffsh">Name</h2>
+<p class="level0">pcap_lookupnet - find the IPv4 network number and netmask for a device </p><a name="SYNOPSIS"></a><h2 class="nroffsh">Synopsis</h2><pre class="level0">
+&#35;include &lt;pcap/pcap.h&gt;
+char errbuf[PCAP_ERRBUF_SIZE];
+int pcap_lookupnet(const char *device, bpf_u_int32 *netp,
+&nbsp;   bpf_u_int32 *maskp, char *errbuf);
+</pre>
+<a name="DESCRIPTION"></a><h2 class="nroffsh">Description</h2>
+<p class="level0"><span Class="bold">pcap_lookupnet</span>() is used to determine the IPv4 network number and mask associated with the network device <span Class="emphasis">device</span>. Both <span Class="emphasis">netp</span> and <span Class="emphasis">maskp</span> are <span Class="bold">bpf_u_int32</span> pointers. <span Class="emphasis">errbuf</span> is a buffer large enough to hold at least <span Class="bold">PCAP_ERRBUF_SIZE</span> chars. </p>
+<p class="level0">This function is not available on Windows.  It supports neither IPv6 nor multiple IPv4 addresses per interface, which obviously is not practical in modern networks.  See <a Class="bold" href="./pcap_findalldevs.html">pcap_findalldevs</a>(3PCAP) for a more elaborate solution to the problem. </p><a name="RETURN"></a><h2 class="nroffsh">Return value</h2>
+<p class="level0"><span Class="bold">pcap_lookupnet</span>() returns <span Class="bold">0</span> on success and <span Class="bold">PCAP_ERROR</span> on failure. If <span Class="bold">PCAP_ERROR</span> is returned, <span Class="emphasis">errbuf</span> is filled in with an appropriate error message. </p><a name="SEE"></a><h2 class="nroffsh">See also</h2>
+<p class="level0"><a Class="bold" href="./pcap.html">pcap</a>(3PCAP) </p><p class="roffit">
+ This HTML page was made with <a href="https://daniel.haxx.se/projects/roffit/">roffit</a>.
+</body></html>

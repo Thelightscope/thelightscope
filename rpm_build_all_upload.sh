@@ -1,0 +1,310 @@
+#!/bin/bash
+set -e
+
+# Add common package manager paths
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
+
+echo "=== LightScope RPM Package Build ==="
+echo ""
+echo "Requirements for RPM building:"
+echo "  - rpmbuild (install with: yum/dnf install rpm-build)"
+echo "  - Required for signing: python3-cryptography"
+echo ""
+
+# Clean up previous build artifacts
+echo "Cleaning up previous build artifacts..."
+rm -rf upload/
+rm -f lightscope_v*_upload.*
+rm -f *.rpm
+
+# Check if we're in the right directory
+if [ ! -f "lightscope/lightscope_core.py" ]; then
+    echo "Error: Please run this script from the thelightscope directory"
+    echo "Current directory: $(pwd)"
+    exit 1
+fi
+
+# Check for rpmbuild
+if ! command -v rpmbuild &> /dev/null; then
+    echo "Error: rpmbuild not found. Install with:"
+    echo "  RHEL/CentOS/Fedora: sudo yum/dnf install rpm-build"
+    echo "  openSUSE: sudo zypper install rpm-build"
+    exit 1
+fi
+
+echo "1. Building RPM package..."
+./build-rpm.sh
+
+echo ""
+echo "2. Package built successfully!"
+echo "RPM packages:"
+ls -la *.rpm 2>/dev/null || echo "No .rpm packages found"
+
+# Get the actual RPM filename for use in deployment
+RPM_FILE=$(ls lightscope-*-*.noarch.rpm 2>/dev/null | head -1)
+if [ -z "$RPM_FILE" ]; then
+    echo "Error: No RPM package found matching pattern lightscope-*-*.noarch.rpm"
+    exit 1
+fi
+echo "Using RPM file: $RPM_FILE"
+
+echo ""
+echo "3. RPM Package information:"
+rpm -qip *.rpm 2>/dev/null || echo "RPM tools not available on this system"
+
+echo ""
+echo "4. RPM Package contents:"
+rpm -qlp *.rpm 2>/dev/null || echo "RPM tools not available on this system"
+
+echo ""
+echo "=== Code Signing Test ==="
+
+# Check if cryptography is installed
+if ! python3 -c "import cryptography" 2>/dev/null; then
+    echo "Installing cryptography for signing..."
+    
+    # Try different methods to install cryptography
+    if command -v pip3 &> /dev/null; then
+        pip3 install cryptography
+    elif command -v pip &> /dev/null; then
+        pip install cryptography
+    elif command -v dnf &> /dev/null; then
+        echo "Using DNF to install python3-cryptography..."
+        sudo dnf install -y python3-cryptography
+    elif command -v yum &> /dev/null; then
+        echo "Using YUM to install python3-cryptography..."
+        sudo yum install -y python3-cryptography
+    elif command -v zypper &> /dev/null; then
+        echo "Using Zypper to install python3-cryptography..."
+        sudo zypper install -y python3-cryptography
+    elif command -v apt-get &> /dev/null; then
+        echo "Using APT to install python3-cryptography..."
+        sudo apt-get update && sudo apt-get install -y python3-cryptography
+    else
+        echo "Error: Cannot install cryptography. Please install manually:"
+        echo "  RHEL/CentOS/Fedora: sudo dnf install python3-cryptography"
+        echo "  Debian/Ubuntu: sudo apt-get install python3-cryptography" 
+        echo "  openSUSE: sudo zypper install python3-cryptography"
+        echo "  Or with pip: python3 -m pip install cryptography"
+        exit 1
+    fi
+    
+    # Verify installation worked
+    if ! python3 -c "import cryptography" 2>/dev/null; then
+        echo "Error: Failed to install cryptography module"
+        echo "Please install manually and run the script again"
+        exit 1
+    fi
+    echo "✓ Cryptography installed successfully"
+fi
+
+echo "5. Checking for signing keys..."
+if [ ! -f "lightscope-private.pem" ] || [ ! -f "lightscope-public.pem" ]; then
+    echo "Generating new RSA key pair..."
+    python3 sign-and-upload.py --generate-keys
+else
+    echo "Using existing key pair:"
+    echo "  - lightscope-private.pem"
+    echo "  - lightscope-public.pem"
+fi
+
+echo ""
+echo "6. Signing the code..."
+python3 sign-and-upload.py --verify
+
+echo ""
+echo "7. Upload directory created:"
+ls -la upload/
+
+echo "8. Archive files created:"
+ls -la lightscope_v*_upload.*
+
+echo ""
+echo "=== Test Complete ==="
+echo ""
+echo "📦 DEPLOYMENT INSTRUCTIONS 📦"
+echo "=============================================="
+echo ""
+echo "Files created for distribution:"
+echo "  1. upload/ directory - Contains all distribution files"
+echo "  2. lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz - Complete package archive"
+echo "  3. $RPM_FILE - Red Hat installer"
+echo ""
+echo "🚀 SERVER UPLOAD LOCATIONS:"
+echo "=============================================="
+echo ""
+echo "ALL FILES GO TO: 📁 /var/www/lightscope/latest/"
+echo ""
+echo "   ├── lightscope_core.py           → https://thelightscope.com/latest/lightscope_core.py"
+echo "   ├── lightscope_core.py.sig       → https://thelightscope.com/latest/lightscope_core.py.sig"
+echo "   ├── public-key                   → https://thelightscope.com/latest/public-key"
+echo "   ├── version                      → https://thelightscope.com/latest/version"
+echo "   └── $RPM_FILE → https://thelightscope.com/latest/$RPM_FILE"
+echo ""
+echo "📋 UPLOAD COMMANDS:"
+echo "=============================================="
+echo ""
+echo "# Extract and upload ALL files to /latest/:"
+echo "tar -xzf lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz"
+echo "scp upload/lightscope_core.py \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
+echo "scp upload/lightscope_core.py.sig \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
+echo "scp upload/lightscope-public.pem \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/public-key"
+echo "scp upload/version \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/version"
+echo "scp $RPM_FILE \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
+echo ""
+echo "🧪 TESTING DEPLOYMENT:"
+echo "=============================================="
+echo ""
+echo "# Test all endpoints (all in /latest/ now):"
+echo "curl https://thelightscope.com/latest/version"
+echo "curl https://thelightscope.com/latest/public-key"
+echo "curl https://thelightscope.com/latest/lightscope_core.py"
+echo "curl https://thelightscope.com/latest/lightscope_core.py.sig"
+echo "curl https://thelightscope.com/latest/$RPM_FILE"
+echo ""
+echo "🔧 LOCAL TESTING:"
+echo "=============================================="
+echo ""
+echo "# Test RPM installation (RHEL/CentOS/Fedora):"
+echo "sudo rpm -i $RPM_FILE"
+echo "# Or with DNF/YUM:"
+echo "sudo dnf install ./$RPM_FILE"
+echo ""
+echo "# Check service status:"
+echo "sudo systemctl status lightscope"
+echo ""
+echo "# View logs:"
+echo "sudo journalctl -fu lightscope"
+echo ""
+echo "✅ Package ready for distribution!"
+
+echo ""
+echo "🚀 AUTOMATED DEPLOYMENT TO SERVER"
+echo "=============================================="
+echo ""
+
+# Check if sshpass is installed
+if ! command -v sshpass &> /dev/null; then
+    echo "Installing sshpass for password authentication..."
+    if command -v dnf &> /dev/null; then
+        sudo dnf install -y sshpass
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y sshpass
+    elif command -v zypper &> /dev/null; then
+        sudo zypper install -y sshpass
+    elif command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y sshpass
+    else
+        echo "Please install sshpass manually"
+        exit 1
+    fi
+fi
+
+# Prompt for server credentials
+echo "Enter server username (e.g., user):"
+read SERVER_USER
+echo "Enter server hostname (e.g., server):"
+read SERVER_HOST
+SERVER_USER_HOST="${SERVER_USER}@${SERVER_HOST}"
+
+echo "Enter password for ${SERVER_USER_HOST}:"
+read -s SERVER_PASSWORD
+
+echo ""
+echo "📤 Uploading files to server..."
+
+# Upload the tar.gz file
+echo "Uploading lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz..."
+sshpass -p "$SERVER_PASSWORD" scp lightscope_v*_upload.tar.gz ${SERVER_USER_HOST}:~/
+
+echo ""
+echo "🔧 Deploying on remote server..."
+
+# Create deployment script
+sshpass -p "$SERVER_PASSWORD" ssh ${SERVER_USER_HOST} "cat > /tmp/deploy_rpm.sh << 'EOF'
+#!/bin/bash
+echo 'Moving archive to /tmp...'
+mv lightscope_v*_upload.tar.gz /tmp/ 2>/dev/null || true
+
+echo 'Switching to root and deploying...'
+sudo bash -c '
+    echo \"Cleaning existing RPM files...\"
+    rm -f /var/www/lightscope/latest/*.rpm
+    
+    echo \"Moving archive to target directory...\"
+    mv /tmp/lightscope_v*_upload.tar.gz /var/www/lightscope/latest/
+    
+    echo \"Changing to target directory...\"
+    cd /var/www/lightscope/latest/
+    
+    echo \"Extracting archive...\"
+    echo \"Archive contents before extraction:\"
+    tar -tzf lightscope_v*_upload.tar.gz | head -10
+    tar -xzf lightscope_v*_upload.tar.gz
+    echo \"Directory contents after extraction:\"
+    ls -la
+    
+    echo \"Moving contents from upload directory...\"
+    if [ -d upload ]; then
+        echo \"Found upload directory, moving contents...\"
+        ls -la upload/
+        mv upload/* . 2>/dev/null || echo \"No files in upload directory\"
+        rm -rf upload/
+    else
+        echo \"Warning: upload directory not found after extraction\"
+        echo \"Checking for alternative structure...\"
+        echo \"Current directory contents:\"
+        ls -la
+        
+        # Check if files are in subdirectories
+        for dir in */; do
+            if [ -d \"\$dir\" ]; then
+                echo \"Checking directory: \$dir\"
+                ls -la \"\$dir\"
+                if [ -f \"\$dir/lightscope_core.py\" ]; then
+                    echo \"Found lightscope_core.py in \$dir, moving contents...\"
+                    mv \"\$dir\"/* . 2>/dev/null || echo \"No files to move from \$dir\"
+                    rm -rf \"\$dir\"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    echo \"Final directory contents after moving files:\"
+    ls -la
+    
+    echo \"Cleaning up...\"
+    rm lightscope_v*_upload.tar.gz
+    
+    echo \"Creating generic latest RPM symlink...\"
+    cp lightscope-*-*.noarch.rpm lightscope_latest.rpm 2>/dev/null || true
+    
+    echo \"Setting proper permissions...\"
+    chown -R www-data:www-data /var/www/lightscope/latest/
+    
+    # Set permissions only if files exist
+    if ls /var/www/lightscope/latest/* 1> /dev/null 2>&1; then
+        chmod -R 644 /var/www/lightscope/latest/*
+        echo \"Permissions set successfully\"
+    else
+        echo \"Warning: No files found to set permissions on\"
+    fi
+    
+    echo \"Deployment complete!\"
+    ls -la /var/www/lightscope/latest/
+'
+EOF
+chmod +x /tmp/deploy_rpm.sh"
+
+# Execute deployment script
+echo "Executing deployment script..."
+sshpass -p "$SERVER_PASSWORD" ssh -t ${SERVER_USER_HOST} "/tmp/deploy_rpm.sh && rm /tmp/deploy_rpm.sh"
+
+echo ""
+echo "✅ DEPLOYMENT COMPLETE!"
+echo ""
+echo "🧪 You can now test the deployment:"
+echo "curl https://thelightscope.com/latest/version"
+echo "curl https://thelightscope.com/latest/public-key"
+echo "curl https://thelightscope.com/latest/$RPM_FILE" 

@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+# Pre-removal script for LightScope
+
+SERVICE_NAME="lightscope"
+
+echo "Stopping LightScope service..."
+
+# Stop and disable the service
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+    systemctl stop "$SERVICE_NAME"
+fi
+
+if systemctl is-enabled --quiet "$SERVICE_NAME"; then
+    systemctl disable "$SERVICE_NAME"
+fi
+
+systemctl daemon-reload
+
+echo "LightScope service stopped and disabled."
+
+exit 0 

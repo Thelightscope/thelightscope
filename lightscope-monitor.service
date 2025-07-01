@@ -1,0 +1,35 @@
+[Unit]
+Description=LightScope Network Security Monitor
+Documentation=https://thelightscope.com
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/bin
+ExecStart=/usr/bin/python3 -m lightscope
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log /tmp /home/root
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Monitoring and health checks
+WatchdogSec=300
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target 

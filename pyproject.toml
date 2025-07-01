@@ -1,0 +1,39 @@
+[project]
+name = "lightscope"
+version = "0.0.101"
+authors = [
+  { name = "Eric Kapitanski", email = "e@alumni.usc.edu" },
+]
+description = "thelightscope cybersecurity research application"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "psutil",
+    "pcap-ct==1.3.0b3; sys_platform == 'win32'",
+    "WMI==1.5.1; sys_platform == 'win32'",
+    "python-libpcap==0.5.2; sys_platform != 'win32'",
+    "requests==2.32.3",
+    "urllib3==2.2.3",
+    "packaging",
+    "scapy==2.6.1",
+    "dpkt==1.9.8"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Homepage = "https://thelightscope.com"
+Issues = "https://thelightscope.com"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lightscope*"]
+
+[project.entry-points.console_scripts]
+lightscope = "lightscope.lightscope:main"
+lightscope_no_auto_update = "lightscope.lightscope_core:lightscope_run"
+

@@ -1,0 +1,8 @@
+include README.md
+include requirements.txt
+include MANIFEST.in
+
+recursive-include requirements *.txt
+recursive-include pylibpcap *.pyx *.pxd
+# recursive-include src *.h
+# global-exclude *.pyx *.pxd

@@ -1,0 +1,55 @@
+Metadata-Version: 2.4
+Name: lightscope
+Version: 0.0.101
+Summary: thelightscope cybersecurity research application
+Author-email: Eric Kapitanski <e@alumni.usc.edu>
+License-Expression: MIT
+Project-URL: Homepage, https://thelightscope.com
+Project-URL: Issues, https://thelightscope.com
+Classifier: Programming Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: psutil
+Requires-Dist: pcap-ct==1.3.0b3; sys_platform == "win32"
+Requires-Dist: WMI==1.5.1; sys_platform == "win32"
+Requires-Dist: python-libpcap==0.5.2; sys_platform != "win32"
+Requires-Dist: requests==2.32.3
+Requires-Dist: urllib3==2.2.3
+Requires-Dist: packaging
+Requires-Dist: scapy==2.6.1
+Requires-Dist: dpkt==1.9.8
+Dynamic: license-file
+
+---
+- name: Deploy and run lightscope_core.py on host b
+  hosts: b
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required apt packages
+      apt:
+        name:
+          - libpcap-dev
+          - python3-pip
+          - python3.8-venv
+        state: present
+
+    - name: Create virtual environment in /root/here
+      command: python3 -m venv /root/here
+      args:
+        creates: /root/here/bin/activate
+
+    - name: Install required Python packages in the virtual environment
+      pip:
+        virtualenv: /root/here
+        virtualenv_command: "python3 -m venv"
+        name:
+          - python-libpcap
+          - scapy
+          - psutil
+          - requests

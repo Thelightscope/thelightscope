@@ -1,0 +1,13 @@
+Package: lightscope
+Version: 0.0.122
+Section: net
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.8), python3-pip, libpcap-dev, python3-venv, systemd, libsystemd-dev, pkg-config
+Maintainer: LightScope Team <e@alumni.usc.edu>
+Description: Network security monitoring and honeypot system
+ LightScope is a comprehensive network security monitoring solution that
+ detects unwanted network traffic and provides honeypot capabilities.
+ It monitors network interfaces for suspicious activity and reports
+ findings to the LightScope cloud platform.
+Homepage: https://thelightscope.com

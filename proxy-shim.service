@@ -1,0 +1,18 @@
+[Unit]
+Description=Proxy Shim Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/mnt/raid/ekapitanski
+ExecStart=/usr/bin/python3 /mnt/raid/ekapitanski/proxy_shim.py
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=proxy-shim
+
+[Install]
+WantedBy=multi-user.target 

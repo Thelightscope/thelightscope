@@ -1,0 +1,27 @@
+[Settings]
+# Database name for storing LightScope data (auto-generated during installation)
+database = 
+
+# Randomization key for IP address anonymization (auto-generated if empty)
+randomization_key = 
+
+# Enable automatic SSH/Telnet honeypot port forwarding (yes/no)
+self_telnet_and_ssh_honeypot_ports_to_forward = no
+
+# Enable automatic updates (yes/no)
+autoupdate = yes
+
+# Update check interval in hours (minimum 1 hour)
+update_check_interval = 24
+
+# Enable debug logging (yes/no)
+debug_logging = no
+
+# Custom interface to monitor (leave empty for auto-detection)
+interface = 
+
+# Maximum number of concurrent honeypot ports
+max_honeypot_ports = 10
+
+# Honeypot rotation interval in hours
+honeypot_rotation_interval = 4 

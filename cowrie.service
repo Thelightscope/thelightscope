@@ -1,0 +1,26 @@
+[Unit]
+Description=Cowrie SSH/Telnet Honeypot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=ekapitanski
+Group=nsnam
+WorkingDirectory=/mnt/raid/ekapitanski/cowrie
+Environment=PATH=/mnt/raid/ekapitanski/cowrie/cowrie-env/bin:/usr/local/bin:/usr/bin:/bin
+Environment=VIRTUAL_ENV=/mnt/raid/ekapitanski/cowrie/cowrie-env
+Environment=HOME=/mnt/raid/ekapitanski
+Environment=USER=ekapitanski
+ExecStart=/bin/bash /mnt/raid/ekapitanski/cowrie/bin/cowrie start
+ExecStop=/bin/bash /mnt/raid/ekapitanski/cowrie/bin/cowrie stop
+ExecReload=/bin/bash /mnt/raid/ekapitanski/cowrie/bin/cowrie restart
+PIDFile=/mnt/raid/ekapitanski/cowrie/var/run/cowrie.pid
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cowrie
+
+[Install]
+WantedBy=multi-user.target 

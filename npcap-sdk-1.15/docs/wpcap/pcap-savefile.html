@@ -1,0 +1,100 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+ "http://www.w3.org/TR/html4/loose.dtd">
+<html><head>
+<title>PCAP-SAVEFILE man page</title>
+<meta name="generator" content="roffit">
+<STYLE type="text/css">
+pre {
+  overflow: auto;
+  margin: 0;
+}
+
+P.level0, pre.level0 {
+ padding-left: 2em;
+}
+
+P.level1, pre.level1 {
+ padding-left: 4em;
+}
+
+P.level2, pre.level2 {
+ padding-left: 6em;
+}
+
+span.emphasis {
+ font-style: italic;
+}
+
+span.bold {
+ font-weight: bold;
+}
+
+span.manpage {
+ font-weight: bold;
+}
+
+h2.nroffsh {
+ background-color: #e0e0e0;
+}
+
+span.nroffip {
+ font-weight: bold;
+ font-size: 120%;
+ font-family: monospace;
+}
+
+p.roffit {
+ text-align: center;
+ font-size: 80%;
+}
+</STYLE>
+</head><body>
+<a name="NAME"></a><h2 class="nroffsh">Name</h2>
+<p class="level0">pcap-savefile - libpcap savefile format </p><a name="DESCRIPTION"></a><h2 class="nroffsh">Description</h2>
+<p class="level0">NOTE: applications and libraries should, if possible, use libpcap to read savefiles, rather than having their own code to read savefiles. If, in the future, a new file format is supported by libpcap, applications and libraries using libpcap to read savefiles will be able to read the new format of savefiles, but applications and libraries using their own code to read savefiles will have to be changed to support the new file format. </p>
+<p class="level0">``Savefiles&#39;&#39; read and written by libpcap and applications using libpcap start with a per-file header.  The format of the per-file header is: </p>
+<p class="level1">box; c s c | c c s. Magic number _ Major version	Minor version _ Reserved1 _ Reserved2 _ Snapshot length _ Link-layer header type and additional information </p>
+<p class="level0">The per-file header length is 24 octets. </p>
+<p class="level0">All fields in the per-file header are in the byte order of the host writing the file.  Normally, the first field in the per-file header is a 4-byte magic number, with the value 0xa1b2c3d4.  The magic number, when read by a host with the same byte order as the host that wrote the file, will have the value 0xa1b2c3d4, and, when read by a host with the opposite byte order as the host that wrote the file, will have the value 0xd4c3b2a1.  That allows software reading the file to determine whether the byte order of the host that wrote the file is the same as the byte order of the host on which the file is being read, and thus whether the values in the per-file and per-packet headers need to be byte-swapped. </p>
+<p class="level0">If the magic number has the value 0xa1b23c4d (with the two nibbles of the two lower-order bytes of the magic number swapped), which would be read as 0xa1b23c4d by a host with the same byte order as the host that wrote the file and as 0x4d3cb2a1 by a host with the opposite byte order as the host that wrote the file, the file format is the same as for regular files, except that the time stamps for packets are given in seconds and nanoseconds rather than seconds and microseconds. </p>
+<p class="level0">Following this are: </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 2-byte file format major version number; the current version number is 2. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 2-byte file format minor version number; the current version number is 4. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 4-byte not used - SHOULD be filled with 0 by pcap file writers, and MUST be ignored by pcap file readers.  This value was documented by some older implementations as &quot;gmt to local correction&quot; or &quot;time zone offset&quot;. Some older pcap file writers stored non-zero values in this field. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 4-byte not used - SHOULD be filled with 0 by pcap file writers, and MUST be ignored by pcap file readers.  This value was documented by some older implementations as &quot;accuracy of timestamps&quot;.  Some older pcap file writers stored non-zero values in this field. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 4-byte number giving the &quot;snapshot length&quot; of the capture; packets longer than the snapshot length are truncated to the snapshot length, so that, if the snapshot length is <span Class="emphasis">N</span>, only the first <span Class="emphasis">N</span> bytes of a packet longer than <span Class="emphasis">N</span> bytes will be saved in the capture. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">A 4-byte number giving the link-layer header type for packets in the capture and optional additional information. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">This format of this field is: </p><pre class="level0">
+&nbsp;                    1                   2                   3
+&nbsp;0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|FCS len|R|P|     Reserved3     |        Link-layer type        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">The field is shown as if it were in the byte order of the host reading or writing the file, with bit 0 being the most-significant bit of the field and bit 31 being the least-significant bit of the field. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">Link-layer type (16 bits): A 16-bit value giving the link-layer header type for packets in the file; see <a Class="bold" href="./pcap-linktype.html">pcap-linktype</a>(7) for the <span Class="bold">LINKTYPE_</span> values that can appear in this field. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">Reserved3 (10 bits): not used - MUST be set to zero by pcap writers, and MUST NOT be interpreted by pcap readers; a reader SHOULD treat a non-zero value as an error. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">P (1 bit): A bit that, if set, indicates that the Frame Check Sequence (FCS) length value is present and, if not set, indicates that the FCS value is not present. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">R (1 bit): not used - MUST be set to zero by pcap writers, and MUST NOT be interpreted by pcap readers; a reader SHOULD treat a non-zero value as an error. </p>
+<p class="level0"><a name=""></a><span class="nroffip"></span> </p>
+<p class="level1">FCS len (4 bits): A 4-bit unsigned value giving the number of 16-bit (2-octet) words of FCS that are appended to each packet, if the P bit is set; if the P bit is not set, and the FCS length is not indicated by the link-layer type value, the FCS length is unknown.  The valid values of the FCS len field are between 0 and 15; Ethernet, for example, would have an FCS length value of 2, corresponding to a 4-octet FCS. </p>
+<p class="level0">Following the per-file header are zero or more packets; each packet begins with a per-packet header, which is immediately followed by the raw packet data.  The format of the per-packet header is: </p>
+<p class="level1">box; c. Time stamp, seconds value _ Time stamp, microseconds or nanoseconds value _ Length of captured packet data _ Un-truncated length of the packet data </p>
+<p class="level0">The per-packet header length is 16 octets. </p>
+<p class="level0">All fields in the per-packet header are in the byte order of the host writing the file.  The per-packet header begins with a time stamp giving the approximate time the packet was captured; the time stamp consists of a 4-byte value, giving the time in seconds since January 1, 1970, 00:00:00 UTC, followed by a 4-byte value, giving the time in microseconds or nanoseconds since that second, depending on the magic number in the file header.  Following that are a 4-byte value giving the number of bytes of captured data that follow the per-packet header and a 4-byte value giving the number of bytes that would have been present had the packet not been truncated by the snapshot length.  The two lengths will be equal if the number of bytes of packet data are less than or equal to the snapshot length. </p><a name="SEE"></a><h2 class="nroffsh">See also</h2>
+<p class="level0"><a Class="bold" href="./pcap.html">pcap</a>(3PCAP) </p><p class="roffit">
+ This HTML page was made with <a href="https://daniel.haxx.se/projects/roffit/">roffit</a>.
+</body></html>
