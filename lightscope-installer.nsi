@@ -313,8 +313,10 @@ Section "Core Files" SEC01
   File "/oname=$INSTDIR\lightscope-runner-windows.py" "lightscope-runner-windows.py"
   
   ; Copy public key if available
-  IfFileExists "lightscope-public.pem" 0 +2
+  IfFileExists "lightscope-public.pem" copy_public_key skip_public_key
+  copy_public_key:
   File "/oname=$INSTDIR\config\lightscope-public.pem" "lightscope-public.pem"
+  skip_public_key:
   
   ; Create config file
   FileOpen $0 "$INSTDIR\config\config.ini" w
