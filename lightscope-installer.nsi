@@ -170,7 +170,7 @@ Function CheckPython
     ExecShell "open" "https://www.python.org/downloads/"
     
     python_retry_loop:
-      MessageBox MB_YESNOCANCEL "Install Python with PATH option. Done?" IDYES recheck_python IDNO skip_python IDCANCEL abort_install
+      MessageBox MB_YESNOCANCEL "Install Python with PATH option, then click YES when done, NO to skip, or CANCEL to abort." IDYES recheck_python IDNO skip_python IDCANCEL abort_install
       
     recheck_python:
       ; Clear errors and recheck Python installation
@@ -247,7 +247,7 @@ Function CheckNpcap
       Abort
   
   skip_npcap:
-    MessageBox MB_OK "Npcap required for LightScope."
+    MessageBox MB_OK "Warning: Npcap is required for LightScope to function properly.$\r$\nLightScope may not work correctly without Npcap."
   
   npcap_found:
     DetailPrint "Npcap found and appears to be properly installed - excellent!"
@@ -631,8 +631,9 @@ Function un.onUninstSuccess
 FunctionEnd
 
 Function un.onInit
-  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES +2
+  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES continue_uninstall
   Abort
+  continue_uninstall:
 FunctionEnd
 
 Section Uninstall
