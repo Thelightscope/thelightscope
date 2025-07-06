@@ -531,9 +531,9 @@ Section "Core Files" SEC01
   FileWrite $9 "$\r$\n=== Installing Python Dependencies ===$\r$\n"
   
   ; Install core dependencies
-  DetailPrint "Installing core dependencies (psutil, requests, urllib3, dpkt)..."
-  FileWrite $9 "Installing: psutil requests==2.32.3 urllib3==2.2.3 dpkt==1.9.8$\r$\n"
-  nsExec::ExecToLog '"$2" install psutil "requests==2.32.3" "urllib3==2.2.3" "dpkt==1.9.8"'
+  DetailPrint "Installing core dependencies (psutil, requests, urllib3, dpkt, cryptography)..."
+  FileWrite $9 "Installing: psutil requests==2.32.3 urllib3==2.2.3 dpkt==1.9.8 cryptography$\r$\n"
+  nsExec::ExecToLog '"$2" install psutil "requests==2.32.3" "urllib3==2.2.3" "dpkt==1.9.8" cryptography'
   Pop $0
   FileWrite $9 "Core dependencies exit code: $0$\r$\n"
   
