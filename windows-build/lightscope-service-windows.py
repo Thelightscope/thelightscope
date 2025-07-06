@@ -34,6 +34,27 @@ else:
     # If running from root directory, use current directory
     LIGHTSCOPE_HOME = SCRIPT_DIR
 
+CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+BIN_DIR = LIGHTSCOPE_HOME / "bin"
+
+# If BIN_DIR doesn't exist, we're probably running from the root directory
+if not BIN_DIR.exists():
+    BIN_DIR = LIGHTSCOPE_HOME
+
+# Setup logging first (before using logger anywhere)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOGS_DIR / "lightscope-service.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("lightscope-service")
+
 # Check for virtual environment and use it if available
 VENV_DIR = LIGHTSCOPE_HOME / "venv"
 if VENV_DIR.exists():
@@ -50,27 +71,6 @@ if VENV_DIR.exists():
 else:
     VENV_PYTHON = None
     logger.info("No virtual environment found, using system Python")
-
-CONFIG_DIR = LIGHTSCOPE_HOME / "config"
-UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
-LOGS_DIR = LIGHTSCOPE_HOME / "logs"
-BIN_DIR = LIGHTSCOPE_HOME / "bin"
-
-# If BIN_DIR doesn't exist, we're probably running from the root directory
-if not BIN_DIR.exists():
-    BIN_DIR = LIGHTSCOPE_HOME
-
-# Setup logging
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOGS_DIR / "lightscope-service.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("lightscope-service")
 
 
 class LightScopeService(win32serviceutil.ServiceFramework):

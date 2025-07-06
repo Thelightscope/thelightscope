@@ -527,11 +527,58 @@ Section "Core Files" SEC01
   ${EndIf}
   
   ; Install other dependencies
-  DetailPrint "Installing other Python dependencies..."
-  nsExec::ExecToLog '"$2" install cryptography psutil requests dpkt'
+  DetailPrint "Installing required Python dependencies..."
+  FileWrite $9 "$\r$\n=== Installing Python Dependencies ===$\r$\n"
+  
+  ; Install core dependencies
+  DetailPrint "Installing core dependencies (psutil, requests, urllib3, dpkt)..."
+  FileWrite $9 "Installing: psutil requests==2.32.3 urllib3==2.2.3 dpkt==1.9.8$\r$\n"
+  nsExec::ExecToLog '"$2" install psutil "requests==2.32.3" "urllib3==2.2.3" "dpkt==1.9.8"'
   Pop $0
+  FileWrite $9 "Core dependencies exit code: $0$\r$\n"
+  
+  ; Install Windows-specific dependencies
+  DetailPrint "Installing Windows-specific dependencies (WMI, pcap-ct)..."
+  FileWrite $9 "Installing: WMI==1.5.1 pcap-ct==1.3.0b3$\r$\n"
+  nsExec::ExecToLog '"$2" install "WMI==1.5.1" "pcap-ct==1.3.0b3"'
+  Pop $0
+  FileWrite $9 "Windows dependencies exit code: $0$\r$\n"
+  
+  ; Install additional Windows dependencies
+  DetailPrint "Installing additional dependencies (scapy, packaging)..."
+  FileWrite $9 "Installing: scapy==2.6.1 packaging$\r$\n"
+  nsExec::ExecToLog '"$2" install "scapy==2.6.1" packaging'
+  Pop $0
+  FileWrite $9 "Additional dependencies exit code: $0$\r$\n"
+  
+  ; Verify critical modules are available
+  DetailPrint "Verifying critical modules..."
+  FileWrite $9 "$\r$\n=== Verifying Critical Modules ===$\r$\n"
+  
+  ; Test pcap module (from pcap-ct package)
+  FileWrite $9 "Testing pcap import...$\r$\n"
+  nsExec::ExecToLog '"$1" -c "import pcap; print($\'pcap module imported successfully$\')"'
+  Pop $0
+  FileWrite $9 "pcap import exit code: $0$\r$\n"
   ${If} $0 != 0
-    DetailPrint "Warning: Failed to install some Python dependencies. You may need to install them manually: pip install cryptography psutil requests dpkt"
+    DetailPrint "WARNING: pcap module not available - packet capture may not work"
+    FileWrite $9 "WARNING: pcap module not available$\r$\n"
+  ${Else}
+    DetailPrint "pcap module available (pcap-ct)"
+    FileWrite $9 "pcap module available (pcap-ct)$\r$\n"
+  ${EndIf}
+  
+  ; Test wmi module
+  FileWrite $9 "Testing wmi import...$\r$\n"
+  nsExec::ExecToLog '"$1" -c "import wmi; print($\'wmi module imported successfully$\')"'
+  Pop $0
+  FileWrite $9 "wmi import exit code: $0$\r$\n"
+  ${If} $0 != 0
+    DetailPrint "WARNING: wmi module not available - Windows interface detection may not work"
+    FileWrite $9 "WARNING: wmi module not available$\r$\n"
+  ${Else}
+    DetailPrint "wmi module available"
+    FileWrite $9 "wmi module available$\r$\n"
   ${EndIf}
   
   ; Install and configure the service for automatic startup
@@ -545,7 +592,7 @@ Section "Core Files" SEC01
     DetailPrint "âœ“ LightScope service installed successfully and configured for automatic startup"
     FileWrite $9 "LightScope service installed successfully$\r$\n"
   ${Else}
-    DetailPrint "âœ— Warning: Failed to install service. You may need to install it manually as Administrator"
+    DetailPrint "WARNING: Warning: Failed to install service. You may need to install it manually as Administrator"
     DetailPrint "  Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" install"
     FileWrite $9 "ERROR: Failed to install service. Exit code: $0$\r$\n"
     FileWrite $9 "Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" install$\r$\n"
@@ -563,7 +610,7 @@ Section "Core Files" SEC01
     DetailPrint "âœ“ LightScope is now running and will start automatically on system boot"
     FileWrite $9 "LightScope service started successfully$\r$\n"
   ${Else}
-    DetailPrint "âœ— Warning: Failed to start service immediately"
+    DetailPrint "WARNING: Warning: Failed to start service immediately"
     DetailPrint "  The service is installed and will start automatically on next boot"
     DetailPrint "  Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" start"
     FileWrite $9 "WARNING: Failed to start service immediately. Exit code: $0$\r$\n"
