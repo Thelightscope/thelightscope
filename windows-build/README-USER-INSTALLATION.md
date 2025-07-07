@@ -47,7 +47,7 @@ After installation, you can manage LightScope through the Start Menu:
 - **LightScope** → **Configuration** - Open the config folder
 
 ### Using the Manager Script
-You can also use the command-line manager:
+You can also use the command-line manager. The manager script automatically detects and uses the virtual environment:
 
 ```cmd
 cd %LOCALAPPDATA%\LightScope
@@ -58,6 +58,12 @@ python lightscope-manager.py status     # Check status
 python lightscope-manager.py logs       # View recent logs
 python lightscope-manager.py enable     # Enable startup
 python lightscope-manager.py disable    # Disable startup
+```
+
+**Alternative**: Use the batch file for easier access:
+```cmd
+cd %LOCALAPPDATA%\LightScope
+lightscope-manager.bat start            # Same commands as above
 ```
 
 ### Using the Batch File

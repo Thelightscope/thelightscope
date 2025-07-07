@@ -349,11 +349,33 @@ def main():
     logger.info(f"Bin directory: {BIN_DIR}")
     logger.info(f"Logs directory: {LOGS_DIR}")
     
-    # Check for administrator privileges
-    if not check_admin_privileges():
-        logger.error("Administrator privileges required for packet capture")
-        logger.error("Please run as Administrator")
-        sys.exit(1)
+    # Check if running in user mode (skip admin check if user_mode = true)
+    user_mode = False
+    try:
+        config_file = CONFIG_DIR / "config.ini"
+        if config_file.exists():
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(config_file)
+            user_mode = config.getboolean('DEFAULT', 'user_mode', fallback=False)
+            logger.info(f"User mode: {user_mode}")
+    except Exception as e:
+        logger.warning(f"Error reading config file: {e}")
+    
+    # Check for administrator privileges only if not in user mode
+    if not user_mode:
+        if not check_admin_privileges():
+            logger.error("Administrator privileges required for packet capture")
+            logger.error("Please run as Administrator")
+            sys.exit(1)
+        logger.info("Running with administrator privileges")
+    else:
+        logger.info("Running in user mode - administrator privileges not required")
+        # Still check if admin privileges are available, but don't require them
+        if check_admin_privileges():
+            logger.info("Note: Running with administrator privileges (enhanced network access)")
+        else:
+            logger.info("Running with user-level privileges (limited network access)")
     
     # Check for Npcap installation
     if not check_npcap_installation():

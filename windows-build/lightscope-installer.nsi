@@ -67,7 +67,7 @@ Function .onInit
   ReadRegStr $R0 ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString"
   StrCmp $R0 "" done
   
-  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "${PRODUCT_NAME} is already installed.$\n$\nClick OK to remove the previous version or Cancel to abort." IDOK uninst
+  MessageBox MB_YESNO "${PRODUCT_NAME} is already installed. Do you want to remove the previous version and continue?" IDYES uninst
   Abort
   
   ; Run the uninstaller
@@ -110,7 +110,7 @@ Function CheckPython
         DetailPrint "Please install Python from https://python.org/downloads/"
         DetailPrint "Make sure to check 'Add Python to PATH' during installation"
         FileWrite $9 "ERROR: Python not found in PATH!$\r$\n"
-        MessageBox MB_OK|MB_ICONSTOP "Python not found!$\n$\nPlease install Python from https://python.org/downloads/$\nMake sure to check 'Add Python to PATH' during installation."
+        MessageBox MB_OK "Python not found! Please install Python from https://python.org/downloads/ and make sure to check 'Add Python to PATH' during installation."
         Abort
       ${Else}
         DetailPrint "✓ Python found via 'python3' command"
@@ -138,17 +138,17 @@ Function CheckNpcap
     FileWrite $9 "ERROR: Npcap not found - REQUIRED for LightScope operation$\r$\n"
     
     ; Show error and offer to open download page
-    MessageBox MB_YESNO|MB_ICONERROR "Npcap is REQUIRED for LightScope to function.$\n$\nNpcap was not found on your system.$\n$\nWould you like to download and install Npcap now?$\nYou'll need to restart this installer after installing Npcap." IDYES open_npcap_download
+    MessageBox MB_YESNO "Npcap is REQUIRED for LightScope to function. Npcap was not found on your system. Would you like to open the Npcap download page now?" IDYES open_npcap_download
     
     ; User chose not to install Npcap
-    MessageBox MB_OK|MB_ICONERROR "Installation cancelled.$\n$\nLightScope requires Npcap to function.$\nPlease install Npcap from https://nmap.org/npcap/ and run this installer again."
+    MessageBox MB_OK "Installation cancelled. LightScope requires Npcap to function. Please install Npcap from https://nmap.org/npcap/ and run this installer again."
     Abort
     
     open_npcap_download:
       DetailPrint "Opening Npcap download page..."
       FileWrite $9 "Opening Npcap download page for user...$\r$\n"
       ExecShell "open" "https://nmap.org/npcap/"
-      MessageBox MB_OK|MB_ICONINFORMATION "Please install Npcap with WinPcap compatibility enabled,$\nthen restart this LightScope installer."
+      MessageBox MB_OK "Please install Npcap with WinPcap compatibility enabled, then restart this LightScope installer."
       Abort
   
   npcap_found:
@@ -194,6 +194,7 @@ Section "Core Files" SEC01
   File "lightscope_core.py"
   File "lightscope-runner-windows.py"
   File "lightscope-manager.py"
+  File "lightscope-manager.bat"
   
   ; Install documentation
   IfFileExists "README-USER-INSTALLATION.md" install_readme skip_readme
@@ -343,7 +344,7 @@ Section "Core Files" SEC01
       ${If} $0 != 0
         DetailPrint "ERROR: No working Python installation found!"
         FileWrite $9 "ERROR: No working Python installation found!$\r$\n"
-        MessageBox MB_OK|MB_ICONSTOP "No working Python installation found!$\n$\nPlease install Python from https://python.org/downloads/"
+        MessageBox MB_OK "No working Python installation found! Please install Python from https://python.org/downloads/"
         Abort
       ${EndIf}
     ${EndIf}
@@ -478,7 +479,7 @@ Section -Post
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
   
   ; Show final installation summary
-  MessageBox MB_OK|MB_ICONINFORMATION "LightScope Installation Complete!$\n$\n✓ LightScope installed as startup application$\n✓ No administrator privileges required$\n✓ Will start automatically when you log in$\n✓ LightScope is now running and monitoring your network$\n$\nYou can view logs in: $INSTDIR\logs\$\nManage LightScope via Start Menu: LightScope"
+  MessageBox MB_OK "LightScope Installation Complete! LightScope installed as startup application. No administrator privileges required. Will start automatically when you log in. LightScope is now running and monitoring your network. You can view logs and manage LightScope via Start Menu."
 SectionEnd
 
 ;--------------------------------
@@ -486,11 +487,11 @@ SectionEnd
 
 Function un.onUninstSuccess
   HideWindow
-  MessageBox MB_ICONINFORMATION|MB_OK "$(^Name) was successfully removed from your computer."
+  MessageBox MB_OK "$(^Name) was successfully removed from your computer."
 FunctionEnd
 
 Function un.onInit
-  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES continue_uninstall
+  MessageBox MB_YESNO "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES continue_uninstall
   Abort
   continue_uninstall:
 FunctionEnd
@@ -521,6 +522,7 @@ Section Uninstall
   Delete "$INSTDIR\lightscope_core.py"
   Delete "$INSTDIR\lightscope-runner-windows.py"
   Delete "$INSTDIR\lightscope-manager.py"
+  Delete "$INSTDIR\lightscope-manager.bat"
   Delete "$INSTDIR\start-lightscope.bat"
   Delete "$INSTDIR\README-USER-INSTALLATION.md"
   Delete "$INSTDIR\config\config.ini"

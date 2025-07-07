@@ -9,12 +9,31 @@ import os
 import sys
 import time
 import subprocess
-import psutil
 from pathlib import Path
 import logging
 
-# Configuration
+# Check if we're running in the virtual environment
 SCRIPT_DIR = Path(__file__).parent.absolute()
+VENV_PYTHON = SCRIPT_DIR / "venv" / "Scripts" / "python.exe"
+
+# If we're not in the virtual environment and it exists, re-run with venv Python
+if VENV_PYTHON.exists() and sys.executable != str(VENV_PYTHON):
+    print("Switching to virtual environment Python...")
+    # Re-run this script with the virtual environment Python
+    subprocess.run([str(VENV_PYTHON), __file__] + sys.argv[1:])
+    sys.exit(0)
+
+# Now we can safely import psutil (it should be available in the venv)
+try:
+    import psutil
+except ImportError:
+    print("ERROR: psutil is not installed.")
+    print("This usually means the virtual environment wasn't set up correctly.")
+    print("Please run the installer again or install psutil manually:")
+    print("  pip install psutil")
+    sys.exit(1)
+
+# Configuration
 LIGHTSCOPE_HOME = SCRIPT_DIR
 LOGS_DIR = LIGHTSCOPE_HOME / "logs"
 CONFIG_DIR = LIGHTSCOPE_HOME / "config"
