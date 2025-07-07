@@ -52,7 +52,7 @@ function Test-Dependencies {
     }
     
     # Check required Python packages
-    $RequiredPackages = @("cryptography", "psutil", "requests", "dpkt", "pywin32")
+    $RequiredPackages = @("cryptography", "psutil", "requests", "dpkt", "pywin32", "wmi")
     foreach ($Package in $RequiredPackages) {
         try {
             python -c "import $Package" 2>$null
@@ -62,6 +62,17 @@ function Test-Dependencies {
                 Write-ColoredOutput "Warning: Python package missing: $Package" "Yellow"
                 Write-ColoredOutput "Installing $Package..." "Yellow"
                 python -m pip install $Package
+                
+                # If we just installed pywin32, run its post-install registration
+                if ($Package -eq "pywin32") {
+                    Write-ColoredOutput "Running pywin32 post-install..." "Yellow"
+                    python -m pywin32_postinstall -install
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-ColoredOutput "OK pywin32 post-install completed successfully" "Green"
+                    } else {
+                        Write-ColoredOutput "Warning: pywin32 post-install failed" "Yellow"
+                    }
+                }
             }
         } catch {
             Write-ColoredOutput "Warning: Could not check Python package: $Package" "Yellow"
@@ -93,10 +104,27 @@ function Prepare-BuildFiles {
     }
     
     # Copy core files
+    # Copy the user-level manager files to root directory temporarily for building
+    if (Test-Path "windows-build\lightscope-manager.py") {
+        Copy-Item "windows-build\lightscope-manager.py" "." -Force
+    }
+    if (Test-Path "windows-build\lightscope-manager.bat") {
+        Copy-Item "windows-build\lightscope-manager.bat" "." -Force  
+    }
+    if (Test-Path "windows-build\install-missing-dependencies.py") {
+        Copy-Item "windows-build\install-missing-dependencies.py" "." -Force
+    }
+    if (Test-Path "windows-build\README-USER-INSTALLATION.md") {
+        Copy-Item "windows-build\README-USER-INSTALLATION.md" "." -Force
+    }
+
     $CoreFiles = @(
         "lightscope\lightscope_core.py",
-        "lightscope-service-windows.py",
-        "lightscope-runner-windows.py",
+        "lightscope-runner-windows.py", 
+        "lightscope-manager.py",
+        "lightscope-manager.bat",
+        "install-missing-dependencies.py",
+        "README-USER-INSTALLATION.md",
         "lightscope-installer.nsi"
     )
     
@@ -112,13 +140,16 @@ function Prepare-BuildFiles {
         }
     }
     
-    # Copy public key if it exists
+    # Copy public key (REQUIRED for secure updates)
     $PublicKeyPath = Join-Path $ScriptDir "lightscope-public.pem"
     if (Test-Path $PublicKeyPath) {
         Copy-Item $PublicKeyPath $BuildDir
         Write-ColoredOutput "OK Copied: lightscope-public.pem" "Green"
     } else {
-        Write-ColoredOutput "Warning: Public key not found - updates may not work" "Yellow"
+        Write-ColoredOutput "ERROR: lightscope-public.pem not found!" "Red"
+        Write-ColoredOutput "This file is required for secure updates." "Red"
+        Write-ColoredOutput "Please ensure lightscope-public.pem is in the project root directory." "Red"
+        exit 1
     }
     
     # Create license file if it doesn't exist
@@ -345,7 +376,6 @@ function Create-DistributionPackage {
     
     # Copy core files for manual installation
     Copy-Item (Join-Path $BuildDir "lightscope_core.py") $DistributionDir
-    Copy-Item (Join-Path $BuildDir "lightscope-service-windows.py") $DistributionDir
     Copy-Item (Join-Path $BuildDir "lightscope-runner-windows.py") $DistributionDir
     
     # Copy public key
@@ -376,16 +406,15 @@ MANUAL INSTALLATION:
 2. Install Npcap from https://nmap.org/npcap/
 3. Install required Python packages:
    pip install cryptography psutil requests dpkt pywin32
-4. Copy all .py files to C:\Program Files\LightScope\bin\
-5. Run as Administrator:
-   python lightscope-service-windows.py install
-   python lightscope-service-windows.py start
+4. Copy all .py files to desired location (e.g., C:\LightScope\)
+5. Run:
+   python lightscope-runner-windows.py
 
-SERVICE MANAGEMENT:
-- Start:   python lightscope-service-windows.py start
-- Stop:    python lightscope-service-windows.py stop
-- Restart: python lightscope-service-windows.py restart
-- Status:  sc query LightScope
+USER MODE OPERATION:
+- The software runs as a user-level application
+- No administrator privileges required
+- Automatically starts with Windows login
+- Can be run manually: python lightscope-runner-windows.py
 
 LOGS:
 - Service logs: C:\Program Files\LightScope\logs\

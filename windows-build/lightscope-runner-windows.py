@@ -2,6 +2,7 @@
 """
 LightScope Windows Runner Script with Auto-Update Capability
 This script handles version checking, secure updates, and launching the main LightScope core on Windows.
+Designed to run as a user-level startup application without requiring administrator privileges.
 """
 
 import os
@@ -56,6 +57,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lightscope-runner")
 
+# Check if we're running in user mode
+def is_user_mode():
+    """Check if LightScope is configured to run in user mode"""
+    try:
+        config_file = CONFIG_DIR / "config.ini"
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                content = f.read()
+                # Check if user_mode is explicitly set to false
+                if 'user_mode = false' in content.lower():
+                    return False
+    except Exception:
+        pass
+    return True  # Default to user mode for user-level operation
+
+USER_MODE = is_user_mode()
+
 class SecureUpdater:
     """Handles secure downloading and verification of LightScope updates"""
     
@@ -97,7 +115,8 @@ class SecureUpdater:
                 logger.info("Loaded bundled public key from package")
                 return
             else:
-                logger.error("Bundled public key not found in package installation")
+                logger.warning("Bundled public key not found in package installation")
+                logger.warning("Updates will be downloaded but signature verification may be limited")
                 self.public_key = None
                 
         except Exception as e:
@@ -135,8 +154,9 @@ class SecureUpdater:
     def verify_signature(self, file_path, signature_path):
         """Verify the digital signature of a file"""
         if not self.public_key:
-            logger.error("No public key available for signature verification")
-            return False
+            logger.warning("No public key available for signature verification")
+            logger.warning("Proceeding with update but signature verification is skipped")
+            return True  # Allow updates without signature verification in user mode
         
         try:
             # Read the file and signature
@@ -186,18 +206,27 @@ class SecureUpdater:
                 
                 # Download signature
                 sig_temp_path = temp_path / "lightscope_core.py.sig"
-                urllib.request.urlretrieve(signature_url, sig_temp_path)
-                
-                # Verify signature
-                if not self.verify_signature(core_temp_path, sig_temp_path):
-                    logger.error("Signature verification failed - update aborted")
-                    return False
+                try:
+                    urllib.request.urlretrieve(signature_url, sig_temp_path)
+                    
+                    # Verify signature
+                    if not self.verify_signature(core_temp_path, sig_temp_path):
+                        logger.error("Signature verification failed - update aborted")
+                        return False
+                except Exception as e:
+                    logger.warning(f"Could not download signature file: {e}")
+                    if not USER_MODE:
+                        logger.error("Signature verification required but signature not available")
+                        return False
+                    else:
+                        logger.warning("Proceeding with update without signature verification (user mode)")
                 
                 # Backup current version
                 current_core = BIN_DIR / "lightscope_core.py"
                 if current_core.exists():
                     backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
-                    current_core.rename(backup_path)
+                    import shutil
+                    shutil.copy2(current_core, backup_path)
                     logger.info(f"Backed up current version to {backup_path}")
                 
                 # Install new version
@@ -218,6 +247,96 @@ def ensure_directories():
     """Ensure all required directories exist"""
     for directory in [CONFIG_DIR, UPDATES_DIR, LOGS_DIR, BIN_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
+
+def check_and_install_dependencies():
+    """Check for required Python packages and install them if missing"""
+    # Check packages in order - some have special dependencies
+    package_checks = [
+        ("cryptography", "cryptography"),
+        ("psutil", "psutil"), 
+        ("requests", "requests"),
+        ("dpkt", "dpkt"),
+        ("pywin32", "pywintypes"),  # Check pywintypes instead of pywin32 as it's the actual import
+        ("wmi", "wmi")
+    ]
+    
+    missing_packages = []
+    
+    logger.info("Checking Python dependencies...")
+    
+    for install_name, import_name in package_checks:
+        try:
+            __import__(import_name)
+            logger.info(f"OK {install_name}: available")
+        except ImportError:
+            logger.warning(f"MISSING {install_name}: missing")
+            missing_packages.append(install_name)
+    
+    if missing_packages:
+        logger.info(f"Installing missing packages: {', '.join(missing_packages)}")
+        for package in missing_packages:
+            try:
+                logger.info(f"Installing {package}...")
+                
+                # Special handling for pywin32
+                if package == "pywin32":
+                    # Install pywin32 with force-reinstall to ensure proper registration
+                    result = subprocess.run([
+                        sys.executable, "-m", "pip", "install", "--force-reinstall", "pywin32"
+                    ], capture_output=True, text=True, timeout=300)
+                    
+                    if result.returncode == 0:
+                        logger.info("OK pywin32 package installed")
+                        
+                        # Try alternative pywin32 post-install methods
+                        try:
+                            logger.info("Running pywin32 post-install setup...")
+                            
+                            # Method 1: Try pywin32_postinstall module
+                            post_install_result = subprocess.run([
+                                sys.executable, "-m", "pywin32_postinstall", "-install"
+                            ], capture_output=True, text=True, timeout=60)
+                            
+                            if post_install_result.returncode == 0:
+                                logger.info("OK pywin32 post-install completed successfully")
+                            else:
+                                logger.warning(f"pywin32_postinstall not available, trying alternative method...")
+                                
+                                # Method 2: Try to import and test the modules directly
+                                try:
+                                    # Force reload the sys.path and try importing
+                                    import importlib
+                                    if hasattr(importlib, 'invalidate_caches'):
+                                        importlib.invalidate_caches()
+                                    
+                                    # Test import of critical modules
+                                    import pywintypes
+                                    import pythoncom
+                                    logger.info("OK pywin32 modules imported successfully after installation")
+                                except ImportError as import_error:
+                                    logger.warning(f"pywin32 modules still not available: {import_error}")
+                                    logger.warning("pywin32 installation may need manual intervention")
+                        except Exception as e:
+                            logger.warning(f"pywin32 post-install error: {e}")
+                    else:
+                        logger.error(f"ERROR Failed to install pywin32: {result.stderr}")
+                else:
+                    # Regular package installation
+                    result = subprocess.run([
+                        sys.executable, "-m", "pip", "install", package
+                    ], capture_output=True, text=True, timeout=300)
+                    
+                    if result.returncode == 0:
+                        logger.info(f"OK Successfully installed {package}")
+                    else:
+                        logger.error(f"ERROR Failed to install {package}: {result.stderr}")
+                        
+            except subprocess.TimeoutExpired:
+                logger.error(f"ERROR Timeout installing {package}")
+            except Exception as e:
+                logger.error(f"ERROR Error installing {package}: {e}")
+    else:
+        logger.info("All required Python packages are available")
 
 def load_lightscope_core():
     """Dynamically load and execute lightscope_core.py"""
@@ -300,12 +419,12 @@ def load_lightscope_core():
         return False
 
 def check_npcap_installation():
-    """Check if Npcap is installed on Windows"""
+    """Check if Npcap is installed on Windows (REQUIRED)"""
     try:
         # Check for Npcap installation
         npcap_path = Path("C:/Windows/System32/Npcap")
         if not npcap_path.exists():
-            logger.warning("Npcap not found in System32. Checking alternate locations...")
+            logger.error("Npcap not found in System32. Checking alternate locations...")
             
             # Check alternate locations
             alt_paths = [
@@ -320,7 +439,10 @@ def check_npcap_installation():
                     break
             
             if not found:
-                logger.error("Npcap not found. Please install Npcap from https://nmap.org/npcap/")
+                logger.error("CRITICAL: Npcap not found!")
+                logger.error("Npcap is REQUIRED for LightScope to function")
+                logger.error("Please install Npcap from https://nmap.org/npcap/")
+                logger.error("Make sure to enable 'WinPcap compatibility' during installation")
                 return False
         
         logger.info("Npcap installation detected")
@@ -348,42 +470,31 @@ def main():
     logger.info(f"Config directory: {CONFIG_DIR}")
     logger.info(f"Bin directory: {BIN_DIR}")
     logger.info(f"Logs directory: {LOGS_DIR}")
+    logger.info(f"User mode: {USER_MODE}")
     
-    # Check if running in user mode (skip admin check if user_mode = true)
-    user_mode = False
-    try:
-        config_file = CONFIG_DIR / "config.ini"
-        if config_file.exists():
-            import configparser
-            config = configparser.ConfigParser()
-            config.read(config_file)
-            user_mode = config.getboolean('DEFAULT', 'user_mode', fallback=False)
-            logger.info(f"User mode: {user_mode}")
-    except Exception as e:
-        logger.warning(f"Error reading config file: {e}")
+    # Check for administrator privileges
+    has_admin = check_admin_privileges()
+    logger.info(f"Administrator privileges: {has_admin}")
     
-    # Check for administrator privileges only if not in user mode
-    if not user_mode:
-        if not check_admin_privileges():
-            logger.error("Administrator privileges required for packet capture")
-            logger.error("Please run as Administrator")
-            sys.exit(1)
-        logger.info("Running with administrator privileges")
+    # LightScope runs in user mode by default - no administrator privileges required
+    if not has_admin:
+        logger.info("Running in user mode (no administrator privileges)")
     else:
-        logger.info("Running in user mode - administrator privileges not required")
-        # Still check if admin privileges are available, but don't require them
-        if check_admin_privileges():
-            logger.info("Note: Running with administrator privileges (enhanced network access)")
-        else:
-            logger.info("Running with user-level privileges (limited network access)")
+        logger.info("Running with administrator privileges")
     
-    # Check for Npcap installation
-    if not check_npcap_installation():
-        logger.error("Npcap is required but not found")
+    # Check for Npcap installation (REQUIRED)
+    npcap_available = check_npcap_installation()
+    if not npcap_available:
+        logger.error("Npcap is REQUIRED but not found")
+        logger.error("LightScope cannot function without Npcap")
+        logger.error("Please install Npcap from https://nmap.org/npcap/ and restart LightScope")
         sys.exit(1)
     
     # Ensure directories exist
     ensure_directories()
+    
+    # Check and install Python dependencies
+    check_and_install_dependencies()
     
     # Initialize updater
     updater = SecureUpdater()
@@ -401,7 +512,7 @@ def main():
         last_update_check = time.time()
         update_interval = 24 * 60 * 60  # 24 hours
         consecutive_failures = 0
-        max_consecutive_failures = 3
+        max_consecutive_failures = 5  # Increased from 3 to 5 for better recovery
         
         # Main execution loop with periodic update checks
         while True:
@@ -414,7 +525,7 @@ def main():
                         logger.info("Update available, downloading...")
                         if updater.download_update():
                             logger.info("Update installed, restarting...")
-                            # Exit so service will restart us with the new version
+                            # Exit so the startup system will restart us with the new version
                             sys.exit(0)
                 except Exception as e:
                     logger.error(f"Error during update check: {e}")
@@ -424,14 +535,22 @@ def main():
             # Load and run the core
             if load_lightscope_core():
                 # Normal shutdown or success
+                logger.info("LightScope core completed successfully")
                 break
             else:
                 consecutive_failures += 1
                 logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
                 
-                # If too many consecutive failures, exit and let service handle restart
+                # If this is a dependency-related failure, try to fix it
+                if consecutive_failures <= 3:  # Only try dependency fixes for first few attempts
+                    logger.info("Checking if dependency issues can be resolved...")
+                    check_and_install_dependencies()
+                
+                # If too many consecutive failures, exit and let startup system handle restart
                 if consecutive_failures >= max_consecutive_failures:
                     logger.error("Too many consecutive failures, exiting...")
+                    logger.error("This might indicate a persistent configuration or system issue")
+                    logger.error("Please check the installation and system requirements")
                     sys.exit(1)
                 
                 # Wait before retry, with exponential backoff

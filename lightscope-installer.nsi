@@ -1,26 +1,26 @@
-; LightScope Windows Installer Script
-; This script creates a complete Windows installer for LightScope
+﻿; LightScope Windows User-Level Installer Script
+; This script creates a complete Windows installer for LightScope that runs as a user application
 
 ;--------------------------------
 ; General
 
 !define PRODUCT_NAME "LightScope"
-!define PRODUCT_VERSION "0.0.102"
+!define PRODUCT_VERSION "1.0.2"
 !define PRODUCT_PUBLISHER "TheLightScope"
 !define PRODUCT_WEB_SITE "https://thelightscope.com"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\lightscope.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
-!define PRODUCT_UNINST_ROOT_KEY "HKLM"
+!define PRODUCT_UNINST_ROOT_KEY "HKCU"
 
 Name "${PRODUCT_NAME}"
 OutFile "LightScope-${PRODUCT_VERSION}-Setup.exe"
-InstallDir "$PROGRAMFILES\LightScope"
-InstallDirRegKey HKLM "${PRODUCT_DIR_REGKEY}" ""
+InstallDir "$LOCALAPPDATA\LightScope"
+InstallDirRegKey HKCU "${PRODUCT_DIR_REGKEY}" ""
 ShowInstDetails show
 ShowUnInstDetails show
 
-; Request administrator privileges
-RequestExecutionLevel admin
+; Request user privileges only (no admin required)
+RequestExecutionLevel user
 
 ; Modern UI
 !include "MUI2.nsh"
@@ -67,7 +67,7 @@ Function .onInit
   ReadRegStr $R0 ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString"
   StrCmp $R0 "" done
   
-  ; MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "${PRODUCT_NAME} is already installed.\n\nClick OK to remove the previous version or Cancel to abort." IDOK uninst
+  MessageBox MB_YESNO "${PRODUCT_NAME} is already installed. Remove the previous version?" IDYES uninst
   Abort
   
   ; Run the uninstaller
@@ -76,104 +76,54 @@ Function .onInit
     ExecWait '$R0 _?=$INSTDIR' ; Do not copy the uninstaller to a temp file
     
     IfErrors no_remove_uninstaller done
-      ; You can either use Delete /REBOOTOK in the uninstaller or add some code
-      ; here to remove the uninstaller. Use a registry key to check
-      ; whether the user has chosen to uninstall. If you are using an uninstaller
-      ; components page, make sure all sections are uninstalled.
     no_remove_uninstaller:
       
   done:
 FunctionEnd
 
 Function CheckPython
-  ; Important message about Python PATH requirement
+  ; Check if Python is installed
   DetailPrint "Checking Python Installation..."
   FileWrite $9 "=== Python Dependency Check ===$\r$\n"
   
-  ; Check if Python is installed by trying to run it
+  ; Check if Python is available
   ClearErrors
-  
-  ; Try to run python command to check if it's available
-  FileWrite $9 "Testing 'python --version' command...$\r$\n"
   nsExec::ExecToStack 'python --version'
   Pop $0 ; exit code
   Pop $1 ; output
   FileWrite $9 "Python check exit code: $0, output: $1$\r$\n"
   
-  ; If python command worked, check if it's version 3.8+
   ${If} $0 == 0
-    ; Python found via 'python' command
-    DetailPrint "Found Python via 'python' command: $1"
+    DetailPrint "Found Python: $1"
     FileWrite $9 "Python found successfully: $1$\r$\n"
     Goto python_found
   ${EndIf}
   
   ; Try python3 command
-  FileWrite $9 "Testing 'python3 --version' command...$\r$\n"
   nsExec::ExecToStack 'python3 --version'
   Pop $0 ; exit code
   Pop $1 ; output
-  FileWrite $9 "Python3 check exit code: $0, output: $1$\r$\n"
   
   ${If} $0 == 0
-    ; Python found via 'python3' command
-    DetailPrint "Found Python via 'python3' command: $1"
+    DetailPrint "Found Python3: $1"
     FileWrite $9 "Python3 found successfully: $1$\r$\n"
     Goto python_found
   ${EndIf}
   
-  ; Try to find Python in common installation paths
-  IfFileExists "$LOCALAPPDATA\Programs\Python\Python38\python.exe" python_found
-  IfFileExists "$LOCALAPPDATA\Programs\Python\Python39\python.exe" python_found
-  IfFileExists "$LOCALAPPDATA\Programs\Python\Python310\python.exe" python_found
-  IfFileExists "$LOCALAPPDATA\Programs\Python\Python311\python.exe" python_found
-  IfFileExists "$LOCALAPPDATA\Programs\Python\Python312\python.exe" python_found
-  IfFileExists "$PROGRAMFILES\Python38\python.exe" python_found
-  IfFileExists "$PROGRAMFILES\Python39\python.exe" python_found
-  IfFileExists "$PROGRAMFILES\Python310\python.exe" python_found
-  IfFileExists "$PROGRAMFILES\Python311\python.exe" python_found
-  IfFileExists "$PROGRAMFILES\Python312\python.exe" python_found
-  
-  ; Check registry as fallback
-  ClearErrors
-  ReadRegStr $0 HKLM "SOFTWARE\Python\PythonCore\3.8\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKLM "SOFTWARE\Python\PythonCore\3.9\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKLM "SOFTWARE\Python\PythonCore\3.10\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKLM "SOFTWARE\Python\PythonCore\3.11\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKLM "SOFTWARE\Python\PythonCore\3.12\InstallPath" ""
-  IfErrors 0 python_found
-  
-  ; Check HKCU registry for user installations
-  ReadRegStr $0 HKCU "SOFTWARE\Python\PythonCore\3.8\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKCU "SOFTWARE\Python\PythonCore\3.9\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKCU "SOFTWARE\Python\PythonCore\3.10\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKCU "SOFTWARE\Python\PythonCore\3.11\InstallPath" ""
-  IfErrors 0 python_found
-  ReadRegStr $0 HKCU "SOFTWARE\Python\PythonCore\3.12\InstallPath" ""
-  IfErrors 0 python_found
-  
   ; Python not found
   DetailPrint "ERROR: Python 3.8+ is required but not found!"
   FileWrite $9 "ERROR: Python not found after all checks!$\r$\n"
-  MessageBox MB_YESNO "Python required. Install now?" IDYES download_python IDNO skip_python
+  MessageBox MB_YESNO "Python 3.8+ is required. Install Python now?" IDYES download_python IDNO abort_install
   
   download_python:
     DetailPrint "Opening Python download page..."
-    FileWrite $9 "Opening Python download page for user...$\r$\n"
+    FileWrite $9 "Opening Python download page...$\r$\n"
     ExecShell "open" "https://www.python.org/downloads/"
     
     python_retry_loop:
-      MessageBox MB_YESNOCANCEL "Install Python with PATH option, then click YES when done, NO to skip, or CANCEL to abort." IDYES recheck_python IDNO skip_python IDCANCEL abort_install
+      MessageBox MB_YESNO "Install Python with 'Add to PATH' option, then click YES when done or NO to abort installation." IDYES recheck_python IDNO abort_install
       
     recheck_python:
-      ; Clear errors and recheck Python installation
       ClearErrors
       nsExec::ExecToStack 'python --version'
       Pop $0
@@ -182,7 +132,6 @@ Function CheckPython
         Goto python_found
       ${EndIf}
       
-      ; Try python3 command
       nsExec::ExecToStack 'python3 --version'
       Pop $0
       ${If} $0 == 0
@@ -190,68 +139,82 @@ Function CheckPython
         Goto python_found
       ${EndIf}
       
-      ; Still not found, show retry option
-      MessageBox MB_YESNO "Python not found. Try again?" IDYES python_retry_loop IDNO skip_python
+      MessageBox MB_YESNO "Python not found. Try again?" IDYES python_retry_loop IDNO abort_install
       
-    abort_install:
-      Abort
-  
-  skip_python:
-    MessageBox MB_YESNO "Python required. Continue anyway?" IDYES python_found IDNO download_python
+  abort_install:
+    DetailPrint "Installation aborted - Python is required"
+    FileWrite $9 "Installation aborted - Python is required$\r$\n"
+    Abort
   
   python_found:
-    DetailPrint "Python found and appears to be in PATH - excellent!"
+    DetailPrint "✓ Python is available"
     FileWrite $9 "Python dependency check completed successfully$\r$\n"
 FunctionEnd
 
 Function CheckNpcap
-  ; Important message about Npcap compatibility requirement
-  DetailPrint "Checking Npcap Installation..."
-  FileWrite $9 "=== Npcap Dependency Check ===$\r$\n"
+  ; Check if NPCAP is installed (REQUIRED - no fallback)
+  DetailPrint "Checking for NPCAP installation..."
+  FileWrite $9 "=== NPCAP Dependency Check ===$\r$\n"
   
-  ; Check if Npcap is installed
-  FileWrite $9 "Checking for Npcap files in system directories...$\r$\n"
-  IfFileExists "$SYSDIR\wpcap.dll" npcap_found 0
-  IfFileExists "$SYSDIR\Packet.dll" npcap_found 0
-  IfFileExists "$SYSDIR\Npcap\wpcap.dll" npcap_found 0
-  FileWrite $9 "Npcap files not found in standard locations$\r$\n"
+  ; Check registry for NPCAP
+  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
+  FileWrite $9 "NPCAP registry check: $0$\r$\n"
+  ${If} $0 != ""
+    DetailPrint "Found NPCAP: $0"
+    FileWrite $9 "NPCAP found: $0$\r$\n"
+    Goto npcap_found
+  ${EndIf}
   
-  ; Npcap not found
-  DetailPrint "ERROR: Npcap is required but not found!"
-  FileWrite $9 "ERROR: Npcap not found after all checks!$\r$\n"
-  MessageBox MB_YESNO "Npcap required. Install now?" IDYES download_npcap IDNO skip_npcap
+  ; Check for NPCAP DLL files
+  ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
+    DetailPrint "Found NPCAP DLL: $WINDIR\System32\npcap.dll"
+    FileWrite $9 "NPCAP DLL found: $WINDIR\System32\npcap.dll$\r$\n"
+    Goto npcap_found
+  ${EndIf}
+  
+  ${If} ${FileExists} "$WINDIR\System32\wpcap.dll"
+    DetailPrint "Found WPCAP DLL: $WINDIR\System32\wpcap.dll"
+    FileWrite $9 "WPCAP DLL found: $WINDIR\System32\wpcap.dll$\r$\n"
+    Goto npcap_found
+  ${EndIf}
+  
+  ; NPCAP not found - ABORT installation
+  DetailPrint "ERROR: NPCAP is required but not found!"
+  FileWrite $9 "ERROR: NPCAP not found - installation aborted!$\r$\n"
+  MessageBox MB_YESNO "NPCAP is required for LightScope to function. Install NPCAP now?" IDYES download_npcap IDNO abort_install
   
   download_npcap:
-    DetailPrint "Opening Npcap download page..."
-    FileWrite $9 "Opening Npcap download page for user...$\r$\n"
+    DetailPrint "Opening NPCAP download page..."
+    FileWrite $9 "Opening NPCAP download page...$\r$\n"
     ExecShell "open" "https://nmap.org/npcap/"
     
     npcap_retry_loop:
-      MessageBox MB_YESNOCANCEL "Install Npcap with WinPcap compatibility. Done?" IDYES recheck_npcap IDNO skip_npcap IDCANCEL abort_install_npcap
+      MessageBox MB_YESNO "Install NPCAP with WinPcap compatibility, then click YES when done or NO to abort installation." IDYES recheck_npcap IDNO abort_install
       
     recheck_npcap:
-      ; Clear errors and recheck Npcap installation
-      ClearErrors
-      IfFileExists "$SYSDIR\wpcap.dll" npcap_found_after_install 0
-      IfFileExists "$SYSDIR\Packet.dll" npcap_found_after_install 0
-      IfFileExists "$SYSDIR\Npcap\wpcap.dll" npcap_found_after_install 0
+      ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
+      ${If} $0 != ""
+        DetailPrint "NPCAP successfully detected: $0"
+        FileWrite $9 "NPCAP successfully detected: $0$\r$\n"
+        Goto npcap_found
+      ${EndIf}
       
-      ; Still not found, show retry option
-      MessageBox MB_YESNO "Npcap not found. Try again?" IDYES npcap_retry_loop IDNO skip_npcap
+      ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
+        DetailPrint "NPCAP DLL successfully detected"
+        FileWrite $9 "NPCAP DLL successfully detected$\r$\n"
+        Goto npcap_found
+      ${EndIf}
       
-    npcap_found_after_install:
-      DetailPrint "Npcap successfully detected after installation!"
-      Goto npcap_found
+      MessageBox MB_YESNO "NPCAP not found. Try again?" IDYES npcap_retry_loop IDNO abort_install
       
-    abort_install_npcap:
-      Abort
-  
-  skip_npcap:
-    MessageBox MB_OK "Warning: Npcap is required for LightScope to function properly.$\r$\nLightScope may not work correctly without Npcap."
+  abort_install:
+    DetailPrint "Installation aborted - NPCAP is required"
+    FileWrite $9 "Installation aborted - NPCAP is required$\r$\n"
+    Abort
   
   npcap_found:
-    DetailPrint "Npcap found and appears to be properly installed - excellent!"
-    FileWrite $9 "Npcap dependency check completed successfully$\r$\n"
+    DetailPrint "✓ NPCAP is available"
+    FileWrite $9 "NPCAP dependency check completed successfully$\r$\n"
 FunctionEnd
 
 ;--------------------------------
@@ -262,19 +225,10 @@ Section "Core Files" SEC01
   
   ; Create detailed installation log
   FileOpen $9 "$INSTDIR\lightscope-installation.log" w
-  FileWrite $9 "=== LightScope Installation Log ===$\r$\n"
+  FileWrite $9 "=== LightScope User-Level Installation Log ===$\r$\n"
   FileWrite $9 "Installation started: $\r$\n"
   FileWrite $9 "Target directory: $INSTDIR$\r$\n"
-  FileWrite $9 "Windows version: "
-  
-  ; Get Windows version info
-  ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "ProductName"
-  FileWrite $9 "$R0$\r$\n"
-  ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentVersion"
-  FileWrite $9 "Windows version: $R0$\r$\n"
-  ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuild"
-  FileWrite $9 "Build: $R0$\r$\n"
-  FileWrite $9 "$\r$\n"
+  FileWrite $9 "User-level installation (no admin privileges required)$\r$\n"
   
   ; Check dependencies
   FileWrite $9 "=== Checking Dependencies ===$\r$\n"
@@ -289,7 +243,6 @@ Section "Core Files" SEC01
   ; Install core files
   FileWrite $9 "Installing Python files...$\r$\n"
   File "lightscope_core.py"
-  File "lightscope-service-windows.py"
   File "lightscope-runner-windows.py"
   FileWrite $9 "Core files installed successfully$\r$\n"
   
@@ -303,20 +256,15 @@ Section "Core Files" SEC01
   
   ; Copy files to bin directory
   CopyFiles "$INSTDIR\lightscope_core.py" "$INSTDIR\bin\"
-  CopyFiles "$INSTDIR\lightscope-service-windows.py" "$INSTDIR\bin\"
   CopyFiles "$INSTDIR\lightscope-runner-windows.py" "$INSTDIR\bin\"
   
   ; Also keep copies in root directory for flexibility
-  ; (in case scripts look in root directory instead of bin)
   File "/oname=$INSTDIR\lightscope_core.py" "lightscope_core.py"
-  File "/oname=$INSTDIR\lightscope-service-windows.py" "lightscope-service-windows.py"
   File "/oname=$INSTDIR\lightscope-runner-windows.py" "lightscope-runner-windows.py"
   
-  ; Copy public key if available
-  IfFileExists "lightscope-public.pem" copy_public_key skip_public_key
-  copy_public_key:
+  ; Copy public key (REQUIRED for secure updates)
   File "/oname=$INSTDIR\config\lightscope-public.pem" "lightscope-public.pem"
-  skip_public_key:
+  FileWrite $9 "Public key copied from installation package$\r$\n"
   
   ; Create config file
   FileOpen $0 "$INSTDIR\config\config.ini" w
@@ -324,17 +272,12 @@ Section "Core Files" SEC01
   FileWrite $0 "interface = auto$\r$\n"
   FileWrite $0 "upload_url = https://thelightscope.com/upload$\r$\n"
   FileWrite $0 "update_interval = 86400$\r$\n"
+  FileWrite $0 "user_mode = true$\r$\n"
   FileClose $0
   
   ; Create Python virtual environment for LightScope
   DetailPrint "Creating Python virtual environment for LightScope..."
   FileWrite $9 "$\r$\n=== Creating Virtual Environment ===$\r$\n"
-  
-  ; Check Python version first
-  FileWrite $9 "Checking Python installation...$\r$\n"
-  nsExec::ExecToLog 'python --version'
-  Pop $0
-  FileWrite $9 "Python version check exit code: $0$\r$\n"
   
   ; Create virtual environment in the installation directory
   FileWrite $9 "Creating virtual environment with: python -m venv $\"$INSTDIR\venv$\"$\r$\n"
@@ -392,212 +335,106 @@ Section "Core Files" SEC01
   FileWrite $9 "System Python executable: $1$\r$\n"
   FileWrite $9 "System pip command: $2$\r$\n"
   
-  ; Try different Python commands to install packages
-  FileWrite $9 "Testing system Python pip...$\r$\n"
-  nsExec::ExecToLog 'python -m pip install --upgrade pip'
-  Pop $0
-  FileWrite $9 "System Python pip upgrade exit code: $0$\r$\n"
-  ${If} $0 != 0
-    FileWrite $9 "System python failed, trying python3...$\r$\n"
-    nsExec::ExecToLog 'python3 -m pip install --upgrade pip'
-    Pop $0
-    FileWrite $9 "Python3 pip upgrade exit code: $0$\r$\n"
-    StrCpy $1 "python3"
-    StrCpy $2 "python3 -m pip"
-    FileWrite $9 "Updated to use python3$\r$\n"
-  ${EndIf}
-  
   venv_python_install:
   
-  ; Install pywin32 first (required for Windows services)
-  DetailPrint "Installing pywin32 for Windows service support..."
-  FileWrite $9 "$\r$\n=== Installing pywin32 ===$\r$\n"
+  ; Install Python dependencies for user-level operation
+  DetailPrint "Installing Python dependencies..."
+  FileWrite $9 "$\r$\n=== Installing Python Dependencies ===$\r$\n"
   FileWrite $9 "Using Python: $1$\r$\n"
   FileWrite $9 "Using pip: $2$\r$\n"
   
-  ; First, uninstall any existing pywin32 to ensure clean installation
-  FileWrite $9 "Uninstalling existing pywin32...$\r$\n"
-  nsExec::ExecToLog '"$2" uninstall -y pywin32'
+  ; Install core dependencies
+  DetailPrint "Installing core Python packages..."
+  FileWrite $9 "Installing core dependencies...$\r$\n"
+  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy'
   Pop $0
-  FileWrite $9 "pywin32 uninstall exit code: $0$\r$\n"
+  FileWrite $9 "Core dependencies install exit code: $0$\r$\n"
   
-  ; Install pywin32 with verbose output
-  FileWrite $9 "Installing pywin32...$\r$\n"
-  nsExec::ExecToLog '"$2" install --upgrade --force-reinstall --no-cache-dir pywin32'
+  ; Install pcap library for Windows
+  DetailPrint "Installing Windows pcap library..."
+  FileWrite $9 "Installing Windows pcap library...$\r$\n"
+  nsExec::ExecToLog '"$2" install --upgrade pcap-ct==1.3.0b3'
   Pop $0
-  FileWrite $9 "pywin32 install exit code: $0$\r$\n"
+  FileWrite $9 "Windows pcap library install exit code: $0$\r$\n"
   
-  ; Verify pywin32 installation
-  DetailPrint "Verifying pywin32 installation..."
-  FileWrite $9 "Verifying pywin32 basic import...$\r$\n"
-  nsExec::ExecToLog '"$1" -c "import win32api; print($\'pywin32 basic import successful$\')"'
-  Pop $0
-  FileWrite $9 "pywin32 basic import exit code: $0$\r$\n"
+  ; Report installation success
   ${If} $0 != 0
-    DetailPrint "ERROR: pywin32 basic import failed!"
-    FileWrite $9 "ERROR: pywin32 basic import failed!$\r$\n"
+    DetailPrint "Warning: Some Python dependencies may have failed to install"
+    FileWrite $9 "Warning: Some Python dependencies may have failed to install$\r$\n"
   ${Else}
-    DetailPrint "✓ pywin32 basic import successful"
-    FileWrite $9 "pywin32 basic import successful$\r$\n"
+    DetailPrint "✓ Python dependencies installed successfully"
+    FileWrite $9 "Python dependencies installed successfully$\r$\n"
   ${EndIf}
   
-  ; Run pywin32 post-install script (critical for service functionality)
-  DetailPrint "Configuring pywin32 for Windows services..."
-  FileWrite $9 "$\r$\n=== Running pywin32 post-install ===$\r$\n"
+  ; Create startup launcher batch file
+  DetailPrint "Creating startup launcher..."
+  FileWrite $9 "$\r$\n=== Creating Startup Launcher ===$\r$\n"
   
-  ; Try multiple methods to run the post-install script
-  FileWrite $9 "Method 1: Direct script execution...$\r$\n"
-  nsExec::ExecToLog '"$1" "$INSTDIR\venv\Scripts\pywin32_postinstall.py" -install'
-  Pop $0
-  FileWrite $9 "Method 1 exit code: $0$\r$\n"
-  ${If} $0 != 0
-    DetailPrint "First post-install attempt failed, trying alternative methods..."
-    FileWrite $9 "Method 1 failed, trying method 2...$\r$\n"
-    
-    ; Try from Python prefix/Scripts
-    FileWrite $9 "Method 2: sys.prefix Scripts directory...$\r$\n"
-    nsExec::ExecToLog '"$1" -c "import sys, os; script = os.path.join(sys.prefix, $\'Scripts$\', $\'pywin32_postinstall.py$\'); exec(open(script).read())" -install'
-    Pop $0
-    FileWrite $9 "Method 2 exit code: $0$\r$\n"
-    ${If} $0 != 0
-      FileWrite $9 "Method 2 failed, trying method 3...$\r$\n"
-      ; Try from site-packages
-      FileWrite $9 "Method 3: site-packages directory...$\r$\n"
-      nsExec::ExecToLog '"$1" -c "import sys, os; script = os.path.join(sys.prefix, $\'Lib$\', $\'site-packages$\', $\'pywin32_postinstall.py$\'); exec(open(script).read())" -install'
-      Pop $0
-      FileWrite $9 "Method 3 exit code: $0$\r$\n"
-      ${If} $0 != 0
-        FileWrite $9 "Method 3 failed, trying method 4...$\r$\n"
-        ; Try direct execution
-        FileWrite $9 "Method 4: Direct module import...$\r$\n"
-        nsExec::ExecToLog '"$1" -c "import pywin32_postinstall; pywin32_postinstall.install()"'
-        Pop $0
-        FileWrite $9 "Method 4 exit code: $0$\r$\n"
-        ${If} $0 != 0
-          DetailPrint "WARNING: All pywin32 post-install attempts failed!"
-          DetailPrint "Service installation may not work. You may need to run manually:"
-          DetailPrint "python Scripts/pywin32_postinstall.py -install"
-          FileWrite $9 "ERROR: All pywin32 post-install methods failed!$\r$\n"
-        ${Else}
-          DetailPrint "✓ pywin32 post-install successful (method 4)"
-          FileWrite $9 "pywin32 post-install successful (method 4)$\r$\n"
-        ${EndIf}
-      ${Else}
-        DetailPrint "✓ pywin32 post-install successful (method 3)"
-        FileWrite $9 "pywin32 post-install successful (method 3)$\r$\n"
-      ${EndIf}
-    ${Else}
-      DetailPrint "✓ pywin32 post-install successful (method 2)"
-      FileWrite $9 "pywin32 post-install successful (method 2)$\r$\n"
-    ${EndIf}
+  FileOpen $0 "$INSTDIR\start-lightscope.bat" w
+  FileWrite $0 "@echo off$\r$\n"
+  FileWrite $0 "title LightScope Network Monitor$\r$\n"
+  FileWrite $0 "cd /d $\"$INSTDIR$\"$\r$\n"
+  ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
+    FileWrite $0 "$\"$INSTDIR\venv\Scripts\python.exe$\" $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $9 "Created launcher using virtual environment Python$\r$\n"
   ${Else}
-    DetailPrint "✓ pywin32 post-install successful (method 1)"
-    FileWrite $9 "pywin32 post-install successful (method 1)$\r$\n"
+    FileWrite $0 "python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $9 "Created launcher using system Python$\r$\n"
   ${EndIf}
+  FileClose $0
   
-  ; Final verification of service modules
-  DetailPrint "Verifying Windows service modules..."
-  FileWrite $9 "$\r$\n=== Verifying Service Modules ===$\r$\n"
-  FileWrite $9 "Testing servicemanager import...$\r$\n"
-  nsExec::ExecToLog '"$1" -c "import servicemanager; print($\'servicemanager imported successfully$\')"'
-  Pop $0
-  FileWrite $9 "servicemanager import exit code: $0$\r$\n"
+  ; Setup automatic startup via Windows registry
+  DetailPrint "Configuring automatic startup..."
+  FileWrite $9 "$\r$\n=== Configuring Automatic Startup ===$\r$\n"
   
-  FileWrite $9 "Testing win32service import...$\r$\n"
-  nsExec::ExecToLog '"$1" -c "import win32service; print($\'win32service imported successfully$\')"'
-  Pop $0
-  FileWrite $9 "win32service import exit code: $0$\r$\n"
+  ; Add registry entry for startup
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope" "$\"$INSTDIR\start-lightscope.bat$\""
+  FileWrite $9 "Added startup registry entry$\r$\n"
   
-  FileWrite $9 "Testing win32serviceutil import...$\r$\n"
-  nsExec::ExecToLog '"$1" -c "import win32serviceutil; print($\'win32serviceutil imported successfully$\')"'
-  Pop $0
-  FileWrite $9 "win32serviceutil import exit code: $0$\r$\n"
+  ; Create startup folder shortcut as backup
+  CreateDirectory "$SMSTARTUP"
+  CreateShortCut "$SMSTARTUP\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" "" 0 SW_SHOWMINIMIZED
+  FileWrite $9 "Created startup folder shortcut$\r$\n"
   
-  FileWrite $9 "Testing all service modules together...$\r$\n"
-  nsExec::ExecToLog '"$1" -c "import servicemanager, win32service, win32serviceutil; print($\'All service modules imported successfully$\')"'
-  Pop $0
-  FileWrite $9 "All service modules import exit code: $0$\r$\n"
-  ${If} $0 != 0
-    DetailPrint "ERROR: Service modules still not available after installation!"
-    DetailPrint "Manual fix required: python Scripts/pywin32_postinstall.py -install"
-    FileWrite $9 "ERROR: Service modules still not available after installation!$\r$\n"
-  ${Else}
-    DetailPrint "✓ All Windows service modules available"
-    FileWrite $9 "All Windows service modules available$\r$\n"
-  ${EndIf}
+  ; Start LightScope immediately
+  DetailPrint "Starting LightScope now..."
+  FileWrite $9 "$\r$\n=== Starting LightScope ===$\r$\n"
+  FileWrite $9 "Launching: $\"$INSTDIR\start-lightscope.bat$\"$\r$\n"
   
-  ; Install other dependencies
-  DetailPrint "Installing other Python dependencies..."
-  nsExec::ExecToLog '"$2" install cryptography psutil requests dpkt'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "Warning: Failed to install some Python dependencies. You may need to install them manually: pip install cryptography psutil requests dpkt"
-  ${EndIf}
-  
-  ; Install and configure the service for automatic startup
-  DetailPrint "Installing LightScope Windows service (will start automatically at boot)..."
-  FileWrite $9 "$\r$\n=== Installing Windows Service ===$\r$\n"
-  FileWrite $9 "Service installation command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" install$\r$\n"
-  nsExec::ExecToLog '"$1" "$INSTDIR\bin\lightscope-service-windows.py" install'
-  Pop $0
-  FileWrite $9 "Service installation exit code: $0$\r$\n"
-  ${If} $0 == 0
-    DetailPrint "✓ LightScope service installed successfully and configured for automatic startup"
-    FileWrite $9 "LightScope service installed successfully$\r$\n"
-  ${Else}
-    DetailPrint "✗ Warning: Failed to install service. You may need to install it manually as Administrator"
-    DetailPrint "  Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" install"
-    FileWrite $9 "ERROR: Failed to install service. Exit code: $0$\r$\n"
-    FileWrite $9 "Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" install$\r$\n"
-  ${EndIf}
-  
-  ; Start the service immediately
-  DetailPrint "Starting LightScope service now..."
-  FileWrite $9 "$\r$\n=== Starting Windows Service ===$\r$\n"
-  FileWrite $9 "Service start command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" start$\r$\n"
-  nsExec::ExecToLog '"$1" "$INSTDIR\bin\lightscope-service-windows.py" start'
-  Pop $0
-  FileWrite $9 "Service start exit code: $0$\r$\n"
-  ${If} $0 == 0
-    DetailPrint "✓ LightScope service started successfully"
-    DetailPrint "✓ LightScope is now running and will start automatically on system boot"
-    FileWrite $9 "LightScope service started successfully$\r$\n"
-  ${Else}
-    DetailPrint "✗ Warning: Failed to start service immediately"
-    DetailPrint "  The service is installed and will start automatically on next boot"
-    DetailPrint "  Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" start"
-    FileWrite $9 "WARNING: Failed to start service immediately. Exit code: $0$\r$\n"
-    FileWrite $9 "Manual command: $\"$1$\" $\"$INSTDIR\bin\lightscope-service-windows.py$\" start$\r$\n"
-  ${EndIf}
+  ; Start minimized to not interfere with installer
+  Exec '"$INSTDIR\start-lightscope.bat"'
+  FileWrite $9 "LightScope started successfully$\r$\n"
   
   ; Close the log file
   FileWrite $9 "$\r$\n=== Installation Complete ===$\r$\n"
+  FileWrite $9 "LightScope is now running and will start automatically when you log in$\r$\n"
   FileWrite $9 "Log file location: $INSTDIR\lightscope-installation.log$\r$\n"
   FileClose $9
   
-  ; Show log file location to user
+  ; Show completion message
+  DetailPrint "✓ LightScope installed and started successfully!"
+  DetailPrint "✓ LightScope will start automatically when you log in"
   DetailPrint "Installation log saved to: $INSTDIR\lightscope-installation.log"
   
 SectionEnd
 
 Section "Desktop Shortcut" SEC02
-  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\bin\lightscope-service-windows.py" "start" "$INSTDIR\lightscope.ico"
+  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\lightscope-runner-windows.py" "" ""
 SectionEnd
 
 Section "Start Menu Shortcuts" SEC03
   CreateDirectory "$SMPROGRAMS\LightScope"
-  CreateShortCut "$SMPROGRAMS\LightScope\LightScope.lnk" "$INSTDIR\bin\lightscope-service-windows.py" "start" "$INSTDIR\lightscope.ico"
-  CreateShortCut "$SMPROGRAMS\LightScope\Start LightScope.lnk" "$INSTDIR\bin\lightscope-service-windows.py" "start"
-  CreateShortCut "$SMPROGRAMS\LightScope\Stop LightScope.lnk" "$INSTDIR\bin\lightscope-service-windows.py" "stop"
-  CreateShortCut "$SMPROGRAMS\LightScope\Restart LightScope.lnk" "$INSTDIR\bin\lightscope-service-windows.py" "restart"
-  CreateShortCut "$SMPROGRAMS\LightScope\Uninstall.lnk" "$INSTDIR\uninst.exe"
+  CreateShortCut "$SMPROGRAMS\LightScope\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" ""
+  CreateShortCut "$SMPROGRAMS\LightScope\Start LightScope.lnk" "$INSTDIR\start-lightscope.bat"
   CreateShortCut "$SMPROGRAMS\LightScope\View Logs.lnk" "$INSTDIR\logs\"
+  CreateShortCut "$SMPROGRAMS\LightScope\Configuration.lnk" "$INSTDIR\config\"
+  CreateShortCut "$SMPROGRAMS\LightScope\Uninstall.lnk" "$INSTDIR\uninst.exe"
 SectionEnd
 
 ;--------------------------------
 ; Descriptions
 
-LangString DESC_SecCore ${LANG_ENGLISH} "Core LightScope files and service installation"
+LangString DESC_SecCore ${LANG_ENGLISH} "Core LightScope files and user-level installation"
 LangString DESC_SecDesktop ${LANG_ENGLISH} "Desktop shortcut for LightScope"
 LangString DESC_SecStartMenu ${LANG_ENGLISH} "Start Menu shortcuts for LightScope"
 
@@ -612,16 +449,16 @@ LangString DESC_SecStartMenu ${LANG_ENGLISH} "Start Menu shortcuts for LightScop
 
 Section -Post
   WriteUninstaller "$INSTDIR\uninst.exe"
-  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\bin\lightscope-service-windows.py"
+  WriteRegStr HKCU "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\lightscope-runner-windows.py"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "$(^Name)"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
-  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\lightscope.ico"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\lightscope-runner-windows.py"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
   
   ; Show final installation summary
-  ; MessageBox MB_OK|MB_ICONINFORMATION "LightScope Installation Complete!\n\n✓ LightScope service is installed and configured\n✓ Service will start automatically when Windows boots\n✓ Service is now running and monitoring your network\n\nYou can view logs in: $INSTDIR\\logs\\\nManage service via Start Menu: LightScope"
+  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running$\r$\n✓ Will start automatically when you log in$\r$\n✓ No administrator privileges required$\r$\n$\r$\nYou can view logs in: $INSTDIR\logs\$\r$\nManage LightScope via Start Menu shortcuts"
 SectionEnd
 
 ;--------------------------------
@@ -639,20 +476,27 @@ Function un.onInit
 FunctionEnd
 
 Section Uninstall
-  ; Stop and remove the service
-  ExecWait 'python "$INSTDIR\bin\lightscope-service-windows.py" stop'
-  ExecWait 'python "$INSTDIR\bin\lightscope-service-windows.py" uninstall'
+  ; Stop LightScope if running
+  DetailPrint "Stopping LightScope..."
+  ; Use built-in nsExec to kill processes instead of KillProcDLL plugin
+  nsExec::ExecToLog 'taskkill /F /IM python.exe /T'
+  ; Also try to kill any specific LightScope processes
+  nsExec::ExecToLog 'taskkill /F /IM lightscope-runner-windows.py /T'
+  
+  ; Remove startup entries
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope"
+  Delete "$SMSTARTUP\LightScope.lnk"
   
   ; Remove files
   Delete "$INSTDIR\uninst.exe"
   Delete "$INSTDIR\bin\lightscope_core.py"
-  Delete "$INSTDIR\bin\lightscope-service-windows.py"
   Delete "$INSTDIR\bin\lightscope-runner-windows.py"
   Delete "$INSTDIR\lightscope_core.py"
-  Delete "$INSTDIR\lightscope-service-windows.py"
   Delete "$INSTDIR\lightscope-runner-windows.py"
+  Delete "$INSTDIR\start-lightscope.bat"
   Delete "$INSTDIR\config\config.ini"
   Delete "$INSTDIR\config\lightscope-public.pem"
+  Delete "$INSTDIR\lightscope-installation.log"
   
   ; Remove shortcuts
   Delete "$DESKTOP\LightScope.lnk"
@@ -664,11 +508,12 @@ Section Uninstall
   RMDir "$INSTDIR\config"
   RMDir /r "$INSTDIR\logs"
   RMDir /r "$INSTDIR\updates"
+  RMDir /r "$INSTDIR\venv"
   RMDir "$INSTDIR"
   
   ; Remove registry keys
   DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
-  DeleteRegKey HKLM "${PRODUCT_DIR_REGKEY}"
+  DeleteRegKey HKCU "${PRODUCT_DIR_REGKEY}"
   
   SetAutoClose true
 SectionEnd 

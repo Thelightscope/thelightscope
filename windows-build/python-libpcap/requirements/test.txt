@@ -1,7 +1,0 @@
--r base.txt
-
-flake8
-pytest
-pytest-cov
-coverage
-tox
