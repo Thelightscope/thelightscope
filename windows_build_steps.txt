@@ -1,3 +1,11 @@
 windows build system_python_install
 
-"C:\Program Files (x86)\NSIS\makensis.exe" "/DOUTFILE=C:\Users\Eric\Desktop\thelightscope\windows-output\LightScope-0.0.102-Setup.exe" "lightscope-installer.nsi"
+
+   cd "C:\Users\Eric\Desktop\thelightscope\windows-build"
+
+cd "C:\Users\Eric\Desktop\thelightscope\windows-build"
+.\rebuild.bat
+
+or powershell
+cd "C:\Users\Eric\Desktop\thelightscope\windows-build"
+& "C:\Program Files (x86)\NSIS\makensis.exe" /DOUTFILE="C:\Users\Eric\Desktop\thelightscope\windows-output\LightScope-0.0.102-Setup-Fixed.exe" "lightscope-installer.nsi"

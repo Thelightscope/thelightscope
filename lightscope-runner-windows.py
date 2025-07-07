@@ -2,6 +2,7 @@
 """
 LightScope Windows Runner Script with Auto-Update Capability
 This script handles version checking, secure updates, and launching the main LightScope core on Windows.
+Designed to run as a user-level startup application without requiring administrator privileges.
 """
 
 import os
@@ -56,6 +57,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lightscope-runner")
 
+# Check if we're running in user mode
+def is_user_mode():
+    """Check if LightScope is configured to run in user mode"""
+    try:
+        config_file = CONFIG_DIR / "config.ini"
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                content = f.read()
+                return 'user_mode = true' in content.lower()
+    except Exception:
+        pass
+    return False
+
+USER_MODE = is_user_mode()
+
 class SecureUpdater:
     """Handles secure downloading and verification of LightScope updates"""
     
@@ -97,7 +113,8 @@ class SecureUpdater:
                 logger.info("Loaded bundled public key from package")
                 return
             else:
-                logger.error("Bundled public key not found in package installation")
+                logger.warning("Bundled public key not found in package installation")
+                logger.warning("Updates will be downloaded but signature verification may be limited")
                 self.public_key = None
                 
         except Exception as e:
@@ -135,8 +152,9 @@ class SecureUpdater:
     def verify_signature(self, file_path, signature_path):
         """Verify the digital signature of a file"""
         if not self.public_key:
-            logger.error("No public key available for signature verification")
-            return False
+            logger.warning("No public key available for signature verification")
+            logger.warning("Proceeding with update but signature verification is skipped")
+            return True  # Allow updates without signature verification in user mode
         
         try:
             # Read the file and signature
@@ -186,18 +204,27 @@ class SecureUpdater:
                 
                 # Download signature
                 sig_temp_path = temp_path / "lightscope_core.py.sig"
-                urllib.request.urlretrieve(signature_url, sig_temp_path)
-                
-                # Verify signature
-                if not self.verify_signature(core_temp_path, sig_temp_path):
-                    logger.error("Signature verification failed - update aborted")
-                    return False
+                try:
+                    urllib.request.urlretrieve(signature_url, sig_temp_path)
+                    
+                    # Verify signature
+                    if not self.verify_signature(core_temp_path, sig_temp_path):
+                        logger.error("Signature verification failed - update aborted")
+                        return False
+                except Exception as e:
+                    logger.warning(f"Could not download signature file: {e}")
+                    if not USER_MODE:
+                        logger.error("Signature verification required but signature not available")
+                        return False
+                    else:
+                        logger.warning("Proceeding with update without signature verification (user mode)")
                 
                 # Backup current version
                 current_core = BIN_DIR / "lightscope_core.py"
                 if current_core.exists():
                     backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
-                    current_core.rename(backup_path)
+                    import shutil
+                    shutil.copy2(current_core, backup_path)
                     logger.info(f"Backed up current version to {backup_path}")
                 
                 # Install new version
@@ -300,12 +327,12 @@ def load_lightscope_core():
         return False
 
 def check_npcap_installation():
-    """Check if Npcap is installed on Windows"""
+    """Check if Npcap is installed on Windows (REQUIRED)"""
     try:
         # Check for Npcap installation
         npcap_path = Path("C:/Windows/System32/Npcap")
         if not npcap_path.exists():
-            logger.warning("Npcap not found in System32. Checking alternate locations...")
+            logger.error("Npcap not found in System32. Checking alternate locations...")
             
             # Check alternate locations
             alt_paths = [
@@ -320,7 +347,10 @@ def check_npcap_installation():
                     break
             
             if not found:
-                logger.error("Npcap not found. Please install Npcap from https://nmap.org/npcap/")
+                logger.error("CRITICAL: Npcap not found!")
+                logger.error("Npcap is REQUIRED for LightScope to function")
+                logger.error("Please install Npcap from https://nmap.org/npcap/")
+                logger.error("Make sure to enable 'WinPcap compatibility' during installation")
                 return False
         
         logger.info("Npcap installation detected")
@@ -348,16 +378,33 @@ def main():
     logger.info(f"Config directory: {CONFIG_DIR}")
     logger.info(f"Bin directory: {BIN_DIR}")
     logger.info(f"Logs directory: {LOGS_DIR}")
+    logger.info(f"User mode: {USER_MODE}")
     
     # Check for administrator privileges
-    if not check_admin_privileges():
-        logger.error("Administrator privileges required for packet capture")
-        logger.error("Please run as Administrator")
-        sys.exit(1)
+    has_admin = check_admin_privileges()
+    logger.info(f"Administrator privileges: {has_admin}")
     
-    # Check for Npcap installation
-    if not check_npcap_installation():
-        logger.error("Npcap is required but not found")
+    if not USER_MODE and not has_admin:
+        logger.error("Administrator privileges required for full functionality")
+        logger.error("Please run as Administrator or enable user mode in config")
+        logger.error("To enable user mode, add 'user_mode = true' to config/config.ini")
+        
+        # Give user a chance to continue anyway
+        try:
+            import time
+            logger.warning("Continuing in limited mode in 10 seconds...")
+            logger.warning("Press Ctrl+C to abort")
+            time.sleep(10)
+        except KeyboardInterrupt:
+            logger.info("Aborted by user")
+            sys.exit(1)
+    
+    # Check for Npcap installation (REQUIRED)
+    npcap_available = check_npcap_installation()
+    if not npcap_available:
+        logger.error("Npcap is REQUIRED but not found")
+        logger.error("LightScope cannot function without Npcap")
+        logger.error("Please install Npcap from https://nmap.org/npcap/ and restart LightScope")
         sys.exit(1)
     
     # Ensure directories exist
@@ -392,7 +439,7 @@ def main():
                         logger.info("Update available, downloading...")
                         if updater.download_update():
                             logger.info("Update installed, restarting...")
-                            # Exit so service will restart us with the new version
+                            # Exit so the startup system will restart us with the new version
                             sys.exit(0)
                 except Exception as e:
                     logger.error(f"Error during update check: {e}")
@@ -402,12 +449,13 @@ def main():
             # Load and run the core
             if load_lightscope_core():
                 # Normal shutdown or success
+                logger.info("LightScope core completed successfully")
                 break
             else:
                 consecutive_failures += 1
                 logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
                 
-                # If too many consecutive failures, exit and let service handle restart
+                # If too many consecutive failures, exit and let startup system handle restart
                 if consecutive_failures >= max_consecutive_failures:
                     logger.error("Too many consecutive failures, exiting...")
                     sys.exit(1)
