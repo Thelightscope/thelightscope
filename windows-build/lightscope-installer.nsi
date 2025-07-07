@@ -346,9 +346,23 @@ Section "Core Files" SEC01
   ; Install core dependencies
   DetailPrint "Installing core Python packages..."
   FileWrite $9 "Installing core dependencies...$\r$\n"
-  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy'
+  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy pywin32'
   Pop $0
   FileWrite $9 "Core dependencies install exit code: $0$\r$\n"
+  
+  ; Install Windows-specific dependencies with special handling for pywin32
+  DetailPrint "Installing Windows-specific packages..."
+  FileWrite $9 "Installing Windows-specific dependencies...$\r$\n"
+  nsExec::ExecToLog '"$2" install --upgrade wmi'
+  Pop $0
+  FileWrite $9 "Windows-specific dependencies install exit code: $0$\r$\n"
+  
+  ; Run pywin32 post-install registration
+  DetailPrint "Configuring pywin32..."
+  FileWrite $9 "Running pywin32 post-install configuration...$\r$\n"
+  nsExec::ExecToLog '"$1" -m pywin32_postinstall -install'
+  Pop $0
+  FileWrite $9 "pywin32 post-install exit code: $0$\r$\n"
   
   ; Install pcap library for Windows
   DetailPrint "Installing Windows pcap library..."
@@ -375,8 +389,17 @@ Section "Core Files" SEC01
   FileWrite $0 "title LightScope Network Monitor$\r$\n"
   FileWrite $0 "cd /d $\"$INSTDIR$\"$\r$\n"
   ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
-    FileWrite $0 "$\"$INSTDIR\venv\Scripts\python.exe$\" $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
-    FileWrite $9 "Created launcher using virtual environment Python$\r$\n"
+    FileWrite $0 "echo Activating virtual environment...$\r$\n"
+    FileWrite $0 "call $\"$INSTDIR\venv\Scripts\activate.bat$\"$\r$\n"
+    FileWrite $0 "if errorlevel 1 ($\r$\n"
+    FileWrite $0 "    echo ERROR: Failed to activate virtual environment$\r$\n"
+    FileWrite $0 "    echo Falling back to system Python...$\r$\n"
+    FileWrite $0 "    python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 ") else ($\r$\n"
+    FileWrite $0 "    echo Virtual environment activated successfully$\r$\n"
+    FileWrite $0 "    python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 ")$\r$\n"
+    FileWrite $9 "Created launcher using virtual environment activation$\r$\n"
   ${Else}
     FileWrite $0 "python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
     FileWrite $9 "Created launcher using system Python$\r$\n"
@@ -419,7 +442,7 @@ Section "Core Files" SEC01
 SectionEnd
 
 Section "Desktop Shortcut" SEC02
-  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\lightscope-runner-windows.py" "" ""
+  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" ""
 SectionEnd
 
 Section "Start Menu Shortcuts" SEC03

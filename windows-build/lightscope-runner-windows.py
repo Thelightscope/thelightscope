@@ -21,6 +21,17 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
 import psutil
 
+# Test pywintypes import at startup
+print("Testing pywintypes import...")
+try:
+    import pywintypes
+    print("✓ SUCCESS: pywintypes imported successfully")
+except ImportError as e:
+    print(f"✗ FAILED: pywintypes import failed - {e}")
+    print("This indicates pywin32 is not properly installed in the current Python environment")
+except Exception as e:
+    print(f"✗ ERROR: Unexpected error importing pywintypes - {e}")
+
 # Configuration
 # Dynamically determine installation directory based on script location
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -248,8 +259,53 @@ def ensure_directories():
     for directory in [CONFIG_DIR, UPDATES_DIR, LOGS_DIR, BIN_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
 
+def get_python_executable():
+    """Get the appropriate Python executable - prefer virtual environment if available"""
+    # Check if we're in a virtual environment
+    venv_python = None
+    
+    # Method 1: Check if we're already in an activated virtual environment
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        logger.info("Already running in virtual environment")
+        return sys.executable
+    
+    # Method 2: Check for virtual environment in the LightScope installation directory
+    try:
+        # Try to find the virtual environment created by the installer
+        venv_paths = [
+            LIGHTSCOPE_HOME / "venv" / "Scripts" / "python.exe",
+            LIGHTSCOPE_HOME.parent / "venv" / "Scripts" / "python.exe",  # In case we're in bin/
+            Path(os.environ.get('LOCALAPPDATA', '')) / "LightScope" / "venv" / "Scripts" / "python.exe"
+        ]
+        
+        for venv_path in venv_paths:
+            if venv_path.exists():
+                logger.info(f"Found virtual environment Python at: {venv_path}")
+                # Test if the virtual environment Python works
+                try:
+                    result = subprocess.run([str(venv_path), "--version"], 
+                                          capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        logger.info(f"Virtual environment Python verified: {result.stdout.strip()}")
+                        return str(venv_path)
+                except Exception as e:
+                    logger.warning(f"Virtual environment Python not working: {e}")
+                    continue
+    except Exception as e:
+        logger.warning(f"Error checking for virtual environment: {e}")
+    
+    # Method 3: Fall back to system Python
+    logger.info("Using system Python")
+    return sys.executable
+
 def check_and_install_dependencies():
     """Check for required Python packages and install them if missing"""
+    # Get the appropriate Python executable
+    python_exe = get_python_executable()
+    pip_cmd = [python_exe, "-m", "pip"]
+    
+    logger.info(f"Using Python executable: {python_exe}")
+    
     # Check packages in order - some have special dependencies
     package_checks = [
         ("cryptography", "cryptography"),
@@ -281,9 +337,10 @@ def check_and_install_dependencies():
                 # Special handling for pywin32
                 if package == "pywin32":
                     # Install pywin32 with force-reinstall to ensure proper registration
-                    result = subprocess.run([
-                        sys.executable, "-m", "pip", "install", "--force-reinstall", "pywin32"
-                    ], capture_output=True, text=True, timeout=300)
+                    result = subprocess.run(
+                        pip_cmd + ["install", "--force-reinstall", "pywin32"],
+                        capture_output=True, text=True, timeout=300
+                    )
                     
                     if result.returncode == 0:
                         logger.info("OK pywin32 package installed")
@@ -294,7 +351,7 @@ def check_and_install_dependencies():
                             
                             # Method 1: Try pywin32_postinstall module
                             post_install_result = subprocess.run([
-                                sys.executable, "-m", "pywin32_postinstall", "-install"
+                                python_exe, "-m", "pywin32_postinstall", "-install"
                             ], capture_output=True, text=True, timeout=60)
                             
                             if post_install_result.returncode == 0:
@@ -322,9 +379,10 @@ def check_and_install_dependencies():
                         logger.error(f"ERROR Failed to install pywin32: {result.stderr}")
                 else:
                     # Regular package installation
-                    result = subprocess.run([
-                        sys.executable, "-m", "pip", "install", package
-                    ], capture_output=True, text=True, timeout=300)
+                    result = subprocess.run(
+                        pip_cmd + ["install", package],
+                        capture_output=True, text=True, timeout=300
+                    )
                     
                     if result.returncode == 0:
                         logger.info(f"OK Successfully installed {package}")

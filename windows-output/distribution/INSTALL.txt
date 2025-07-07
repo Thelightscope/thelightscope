@@ -16,10 +16,11 @@ MANUAL INSTALLATION:
    python lightscope-runner-windows.py
 
 USER MODE OPERATION:
-- The software runs as a user-level application
+- The software runs as a user-level application in a virtual environment
 - No administrator privileges required
 - Automatically starts with Windows login
-- Can be run manually: python lightscope-runner-windows.py
+- Virtual environment is activated automatically
+- Can be run manually: start-lightscope.bat
 
 LOGS:
 - Service logs: C:\Program Files\LightScope\logs\

@@ -52,19 +52,30 @@ function Test-Dependencies {
     }
     
     # Check required Python packages
-    $RequiredPackages = @("cryptography", "psutil", "requests", "dpkt", "pywin32", "wmi")
-    foreach ($Package in $RequiredPackages) {
+    $RequiredPackages = @(
+        @("cryptography", "cryptography"),
+        @("psutil", "psutil"),
+        @("requests", "requests"),
+        @("dpkt", "dpkt"),
+        @("pywin32", "pywintypes"),  # Install pywin32 but test pywintypes
+        @("wmi", "wmi")
+    )
+    
+    foreach ($PackageInfo in $RequiredPackages) {
+        $InstallName = $PackageInfo[0]
+        $ImportName = $PackageInfo[1]
+        
         try {
-            python -c "import $Package" 2>$null
+            python -c "import $ImportName" 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-ColoredOutput "OK Python package found: $Package" "Green"
+                Write-ColoredOutput "OK Python package found: $InstallName" "Green"
             } else {
-                Write-ColoredOutput "Warning: Python package missing: $Package" "Yellow"
-                Write-ColoredOutput "Installing $Package..." "Yellow"
-                python -m pip install $Package
+                Write-ColoredOutput "Warning: Python package missing: $InstallName" "Yellow"
+                Write-ColoredOutput "Installing $InstallName..." "Yellow"
+                python -m pip install $InstallName
                 
                 # If we just installed pywin32, run its post-install registration
-                if ($Package -eq "pywin32") {
+                if ($InstallName -eq "pywin32") {
                     Write-ColoredOutput "Running pywin32 post-install..." "Yellow"
                     python -m pywin32_postinstall -install
                     if ($LASTEXITCODE -eq 0) {
@@ -75,7 +86,7 @@ function Test-Dependencies {
                 }
             }
         } catch {
-            Write-ColoredOutput "Warning: Could not check Python package: $Package" "Yellow"
+            Write-ColoredOutput "Warning: Could not check Python package: $InstallName" "Yellow"
         }
     }
 }
@@ -411,10 +422,11 @@ MANUAL INSTALLATION:
    python lightscope-runner-windows.py
 
 USER MODE OPERATION:
-- The software runs as a user-level application
+- The software runs as a user-level application in a virtual environment
 - No administrator privileges required
 - Automatically starts with Windows login
-- Can be run manually: python lightscope-runner-windows.py
+- Virtual environment is activated automatically
+- Can be run manually: start-lightscope.bat
 
 LOGS:
 - Service logs: C:\Program Files\LightScope\logs\
@@ -467,7 +479,8 @@ function Show-Summary {
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR END USERS:" "Yellow"
     Write-ColoredOutput "- Download and run LightScope-$Version-Setup.exe as Administrator" "White"
-    Write-ColoredOutput "- The installer will check dependencies and install the service" "White"
+    Write-ColoredOutput "- The installer creates a virtual environment and installs dependencies" "White"
+    Write-ColoredOutput "- LightScope runs in the virtual environment automatically" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR DISTRIBUTION:" "Yellow"
     Write-ColoredOutput "- Upload LightScope-$Version-Setup.exe to your download server" "White"
@@ -478,9 +491,10 @@ function Show-Summary {
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "Test the installer on a clean Windows system:" "White"
     Write-ColoredOutput "1. Run installer as Administrator" "White"
-    Write-ColoredOutput "2. Check service status: sc query LightScope" "White"
-    Write-ColoredOutput "3. View logs: dir `"C:\Program Files\LightScope\logs`"" "White"
-    Write-ColoredOutput "4. Test uninstall from Add/Remove Programs" "White"
+    Write-ColoredOutput "2. Check virtual environment: dir `"%LOCALAPPDATA%\LightScope\venv`"" "White"
+    Write-ColoredOutput "3. Test launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope.bat`"" "White"
+    Write-ColoredOutput "4. View logs: dir `"%LOCALAPPDATA%\LightScope\logs`"" "White"
+    Write-ColoredOutput "5. Test uninstall from Add/Remove Programs" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "SUCCESS: Windows package ready for distribution!" "Green"
 }
