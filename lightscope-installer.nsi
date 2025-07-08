@@ -406,27 +406,66 @@ Section "Core Files" SEC01
   ${EndIf}
   FileClose $0
   
+  ; Create background launcher (no window)
+  FileOpen $0 "$INSTDIR\start-lightscope-background.bat" w
+  FileWrite $0 "@echo off$\r$\n"
+  FileWrite $0 "cd /d $\"$INSTDIR$\"$\r$\n"
+  FileWrite $0 "echo Background launcher started at %date% %time% >> logs\background.log$\r$\n"
+  ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
+    FileWrite $0 "echo Attempting virtual environment activation... >> logs\background.log$\r$\n"
+    FileWrite $0 "call $\"$INSTDIR\venv\Scripts\activate.bat$\" >> logs\background.log 2>&1$\r$\n"
+    FileWrite $0 "if errorlevel 1 ($\r$\n"
+    FileWrite $0 "    echo ERROR: Virtual environment activation failed, using system Python >> logs\background.log$\r$\n"
+    FileWrite $0 "    if exist $\"C:\Windows\py.exe$\" ($\r$\n"
+    FileWrite $0 "        start /min C:\Windows\py.exe -3 -B $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 "    ) else ($\r$\n"
+    FileWrite $0 "        start /min python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 "    )$\r$\n"
+    FileWrite $0 ") else ($\r$\n"
+    FileWrite $0 "    echo Virtual environment activated successfully >> logs\background.log$\r$\n"
+    FileWrite $0 "    if exist $\"pythonw.exe$\" ($\r$\n"
+    FileWrite $0 "        echo Using pythonw.exe for silent execution >> logs\background.log$\r$\n"
+    FileWrite $0 "        start /min pythonw $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 "    ) else ($\r$\n"
+    FileWrite $0 "        echo pythonw.exe not found, using python.exe >> logs\background.log$\r$\n"
+    FileWrite $0 "        start /min python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 "    )$\r$\n"
+    FileWrite $0 ")$\r$\n"
+    FileWrite $9 "Created robust background launcher with virtual environment$\r$\n"
+  ${Else}
+    FileWrite $0 "echo No virtual environment found, using system Python >> logs\background.log$\r$\n"
+    FileWrite $0 "if exist $\"C:\Windows\py.exe$\" ($\r$\n"
+    FileWrite $0 "    echo Using Python Launcher >> logs\background.log$\r$\n"
+    FileWrite $0 "    start /min C:\Windows\py.exe -3 -B $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 ") else ($\r$\n"
+    FileWrite $0 "    echo Using system python command >> logs\background.log$\r$\n"
+    FileWrite $0 "    start /min python $\"$INSTDIR\lightscope-runner-windows.py$\"$\r$\n"
+    FileWrite $0 ")$\r$\n"
+    FileWrite $9 "Created robust background launcher using system Python$\r$\n"
+  ${EndIf}
+  FileClose $0
+  
   ; Setup automatic startup via Windows registry
   DetailPrint "Configuring automatic startup..."
   FileWrite $9 "$\r$\n=== Configuring Automatic Startup ===$\r$\n"
   
-  ; Add registry entry for startup
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope" "$\"$INSTDIR\start-lightscope.bat$\""
-  FileWrite $9 "Added startup registry entry$\r$\n"
+  ; Add registry entry for startup (background mode)
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope" "$\"$INSTDIR\start-lightscope-background.bat$\""
+  FileWrite $9 "Added startup registry entry (background mode)$\r$\n"
   
-  ; Create startup folder shortcut as backup
+  ; Create startup folder shortcut as backup (background mode)
   CreateDirectory "$SMSTARTUP"
-  CreateShortCut "$SMSTARTUP\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" "" 0 SW_SHOWMINIMIZED
-  FileWrite $9 "Created startup folder shortcut$\r$\n"
+  CreateShortCut "$SMSTARTUP\LightScope.lnk" "$INSTDIR\start-lightscope-background.bat" "" "" 0 SW_SHOWMINIMIZED
+  FileWrite $9 "Created startup folder shortcut (background mode)$\r$\n"
   
-  ; Start LightScope immediately
-  DetailPrint "Starting LightScope now..."
+  ; Start LightScope immediately in background
+  DetailPrint "Starting LightScope in background..."
   FileWrite $9 "$\r$\n=== Starting LightScope ===$\r$\n"
-  FileWrite $9 "Launching: $\"$INSTDIR\start-lightscope.bat$\"$\r$\n"
+  FileWrite $9 "Launching: $\"$INSTDIR\start-lightscope-background.bat$\"$\r$\n"
   
-  ; Start minimized to not interfere with installer
-  Exec '"$INSTDIR\start-lightscope.bat"'
-  FileWrite $9 "LightScope started successfully$\r$\n"
+  ; Start in background to not interfere with installer
+  Exec '"$INSTDIR\start-lightscope-background.bat"'
+  FileWrite $9 "LightScope started in background successfully$\r$\n"
   
   ; Close the log file
   FileWrite $9 "$\r$\n=== Installation Complete ===$\r$\n"
@@ -437,18 +476,22 @@ Section "Core Files" SEC01
   ; Show completion message
   DetailPrint "✓ LightScope installed and started successfully!"
   DetailPrint "✓ LightScope will start automatically when you log in"
+  DetailPrint "✓ Launchers available in: $INSTDIR"
+  DetailPrint "  - start-lightscope-background.bat (silent mode)"
+  DetailPrint "  - start-lightscope.bat (debug mode)"
   DetailPrint "Installation log saved to: $INSTDIR\lightscope-installation.log"
   
 SectionEnd
 
-Section "Desktop Shortcut" SEC02
-  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" ""
+Section /o "Desktop Shortcut" SEC02
+  CreateShortCut "$DESKTOP\LightScope.lnk" "$INSTDIR\start-lightscope-background.bat" "" ""
 SectionEnd
 
 Section "Start Menu Shortcuts" SEC03
   CreateDirectory "$SMPROGRAMS\LightScope"
-  CreateShortCut "$SMPROGRAMS\LightScope\LightScope.lnk" "$INSTDIR\start-lightscope.bat" "" ""
-  CreateShortCut "$SMPROGRAMS\LightScope\Start LightScope.lnk" "$INSTDIR\start-lightscope.bat"
+  CreateShortCut "$SMPROGRAMS\LightScope\LightScope.lnk" "$INSTDIR\start-lightscope-background.bat" "" ""
+  CreateShortCut "$SMPROGRAMS\LightScope\Start LightScope (Background).lnk" "$INSTDIR\start-lightscope-background.bat"
+  CreateShortCut "$SMPROGRAMS\LightScope\Start LightScope (Debug Mode).lnk" "$INSTDIR\start-lightscope.bat"
   CreateShortCut "$SMPROGRAMS\LightScope\View Logs.lnk" "$INSTDIR\logs\"
   CreateShortCut "$SMPROGRAMS\LightScope\Configuration.lnk" "$INSTDIR\config\"
   CreateShortCut "$SMPROGRAMS\LightScope\Uninstall.lnk" "$INSTDIR\uninst.exe"
@@ -457,9 +500,9 @@ SectionEnd
 ;--------------------------------
 ; Descriptions
 
-LangString DESC_SecCore ${LANG_ENGLISH} "Core LightScope files and user-level installation"
-LangString DESC_SecDesktop ${LANG_ENGLISH} "Desktop shortcut for LightScope"
-LangString DESC_SecStartMenu ${LANG_ENGLISH} "Start Menu shortcuts for LightScope"
+LangString DESC_SecCore ${LANG_ENGLISH} "Core LightScope files and user-level installation (required)"
+LangString DESC_SecDesktop ${LANG_ENGLISH} "Optional desktop shortcut for LightScope (not recommended - runs automatically)"
+LangString DESC_SecStartMenu ${LANG_ENGLISH} "Start Menu shortcuts for LightScope management"
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SEC01} $(DESC_SecCore)
@@ -481,7 +524,7 @@ Section -Post
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
   
   ; Show final installation summary
-  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running$\r$\n✓ Will start automatically when you log in$\r$\n✓ No administrator privileges required$\r$\n$\r$\nYou can view logs in: $INSTDIR\logs\$\r$\nManage LightScope via Start Menu shortcuts"
+  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running in background$\r$\n✓ Will start automatically when you log in$\r$\n✓ No administrator privileges required$\r$\n✓ No visible command prompt window$\r$\n$\r$\nManual launchers available in:$\r$\n$INSTDIR$\r$\n$\r$\nView logs: $INSTDIR\logs\$\r$\nManage via Start Menu shortcuts"
 SectionEnd
 
 ;--------------------------------
@@ -517,9 +560,11 @@ Section Uninstall
   Delete "$INSTDIR\lightscope_core.py"
   Delete "$INSTDIR\lightscope-runner-windows.py"
   Delete "$INSTDIR\start-lightscope.bat"
+  Delete "$INSTDIR\start-lightscope-background.bat"
   Delete "$INSTDIR\config\config.ini"
   Delete "$INSTDIR\config\lightscope-public.pem"
   Delete "$INSTDIR\lightscope-installation.log"
+  Delete "$INSTDIR\logs\background.log"
   
   ; Remove shortcuts
   Delete "$DESKTOP\LightScope.lnk"

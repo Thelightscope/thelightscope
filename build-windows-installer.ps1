@@ -410,7 +410,7 @@ LightScope Windows Installation Instructions
 AUTOMATIC INSTALLATION (Recommended):
 1. Run LightScope-$Version-Setup.exe as Administrator
 2. Follow the installation wizard
-3. The service will start automatically
+3. LightScope will start automatically in the background
 
 MANUAL INSTALLATION:
 1. Install Python 3.8+ from https://python.org/
@@ -424,13 +424,20 @@ MANUAL INSTALLATION:
 USER MODE OPERATION:
 - The software runs as a user-level application in a virtual environment
 - No administrator privileges required
-- Automatically starts with Windows login
+- Automatically starts with Windows login (background mode)
 - Virtual environment is activated automatically
-- Can be run manually: start-lightscope.bat
+- No visible command prompt window
+
+RUNNING LIGHTSCOPE:
+- Background mode (default): start-lightscope-background.bat
+- Debug mode (visible window): start-lightscope.bat
+- Both launchers located in: %LOCALAPPDATA%\LightScope\
+- Start Menu shortcuts available for management
+- Desktop shortcut is optional (unchecked by default)
 
 LOGS:
-- Service logs: C:\Program Files\LightScope\logs\
-- Windows Event Log: Windows Logs > Application
+- Application logs: %LOCALAPPDATA%\LightScope\logs\
+- Installation log: %LOCALAPPDATA%\LightScope\lightscope-installation.log
 
 UNINSTALL:
 - Use Add/Remove Programs or
@@ -480,7 +487,8 @@ function Show-Summary {
     Write-ColoredOutput "FOR END USERS:" "Yellow"
     Write-ColoredOutput "- Download and run LightScope-$Version-Setup.exe as Administrator" "White"
     Write-ColoredOutput "- The installer creates a virtual environment and installs dependencies" "White"
-    Write-ColoredOutput "- LightScope runs in the virtual environment automatically" "White"
+    Write-ColoredOutput "- LightScope runs in the virtual environment automatically (background mode)" "White"
+    Write-ColoredOutput "- No visible command prompt window - runs silently in background" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR DISTRIBUTION:" "Yellow"
     Write-ColoredOutput "- Upload LightScope-$Version-Setup.exe to your download server" "White"
@@ -492,9 +500,10 @@ function Show-Summary {
     Write-ColoredOutput "Test the installer on a clean Windows system:" "White"
     Write-ColoredOutput "1. Run installer as Administrator" "White"
     Write-ColoredOutput "2. Check virtual environment: dir `"%LOCALAPPDATA%\LightScope\venv`"" "White"
-    Write-ColoredOutput "3. Test launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope.bat`"" "White"
-    Write-ColoredOutput "4. View logs: dir `"%LOCALAPPDATA%\LightScope\logs`"" "White"
-    Write-ColoredOutput "5. Test uninstall from Add/Remove Programs" "White"
+    Write-ColoredOutput "3. Test background launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope-background.bat`"" "White"
+    Write-ColoredOutput "4. Test debug launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope.bat`"" "White"
+    Write-ColoredOutput "5. View logs: dir `"%LOCALAPPDATA%\LightScope\logs`"" "White"
+    Write-ColoredOutput "6. Test uninstall from Add/Remove Programs" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "SUCCESS: Windows package ready for distribution!" "Green"
 }

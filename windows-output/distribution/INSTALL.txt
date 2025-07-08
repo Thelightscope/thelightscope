@@ -4,7 +4,7 @@
 AUTOMATIC INSTALLATION (Recommended):
 1. Run LightScope-1.0.2-Setup.exe as Administrator
 2. Follow the installation wizard
-3. The service will start automatically
+3. LightScope will start automatically in the background
 
 MANUAL INSTALLATION:
 1. Install Python 3.8+ from https://python.org/
@@ -18,13 +18,20 @@ MANUAL INSTALLATION:
 USER MODE OPERATION:
 - The software runs as a user-level application in a virtual environment
 - No administrator privileges required
-- Automatically starts with Windows login
+- Automatically starts with Windows login (background mode)
 - Virtual environment is activated automatically
-- Can be run manually: start-lightscope.bat
+- No visible command prompt window
+
+RUNNING LIGHTSCOPE:
+- Background mode (default): start-lightscope-background.bat
+- Debug mode (visible window): start-lightscope.bat
+- Both launchers located in: %LOCALAPPDATA%\LightScope\
+- Start Menu shortcuts available for management
+- Desktop shortcut is optional (unchecked by default)
 
 LOGS:
-- Service logs: C:\Program Files\LightScope\logs\
-- Windows Event Log: Windows Logs > Application
+- Application logs: %LOCALAPPDATA%\LightScope\logs\
+- Installation log: %LOCALAPPDATA%\LightScope\lightscope-installation.log
 
 UNINSTALL:
 - Use Add/Remove Programs or

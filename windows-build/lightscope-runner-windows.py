@@ -419,19 +419,102 @@ def load_lightscope_core():
                 logger.error(f"  - {path}")
             return False
         
+        # Log core file details
+        try:
+            import stat
+            core_stat = core_path.stat()
+            logger.info(f"Core file size: {core_stat.st_size} bytes")
+            logger.info(f"Core file modified: {time.ctime(core_stat.st_mtime)}")
+        except Exception as stat_error:
+            logger.warning(f"Could not get core file stats: {stat_error}")
+        
         # Add the directory containing lightscope_core.py to Python path
         core_dir = core_path.parent
         if str(core_dir) not in sys.path:
             sys.path.insert(0, str(core_dir))
+            logger.info(f"Added to Python path: {core_dir}")
+        
+        # Preserve current logging configuration
+        current_logger = logger
+        current_handlers = logger.handlers.copy()
+        current_level = logger.level
+        logger.info("Preserved current logging configuration")
         
         # Import the core module
-        import lightscope_core
+        logger.info("Importing lightscope_core module...")
+        try:
+            import lightscope_core
+            logger.info("Successfully imported lightscope_core module")
+            
+            # Check if lightscope_core has the expected function
+            if hasattr(lightscope_core, 'lightscope_run'):
+                logger.info("Found lightscope_run function in core module")
+            else:
+                logger.error("lightscope_run function not found in core module!")
+                available_functions = [attr for attr in dir(lightscope_core) if callable(getattr(lightscope_core, attr)) and not attr.startswith('_')]
+                logger.error(f"Available functions: {available_functions}")
+                return False
+                
+        except ImportError as import_error:
+            logger.error(f"Failed to import lightscope_core: {import_error}")
+            return False
+        except Exception as import_exception:
+            logger.error(f"Unexpected error importing lightscope_core: {import_exception}")
+            return False
         
-        # Run the main function
+        # Capture stdout/stderr to catch any prints from lightscope_core
+        import io
+        import contextlib
+        
+        # Create string buffers to capture output
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        
         logger.info("Starting LightScope core...")
-        lightscope_core.lightscope_run()
+        logger.info("=" * 50)
         
-        # If we reach here, it means lightscope_run() exited normally
+        # Run the main function with output capture
+        try:
+            with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
+                lightscope_core.lightscope_run()
+        except Exception as core_error:
+            # Log any captured output before handling the error
+            stdout_content = stdout_buffer.getvalue()
+            stderr_content = stderr_buffer.getvalue()
+            
+            if stdout_content:
+                logger.info("Captured stdout from lightscope_core:")
+                for line in stdout_content.splitlines():
+                    logger.info(f"  STDOUT: {line}")
+            
+            if stderr_content:
+                logger.error("Captured stderr from lightscope_core:")
+                for line in stderr_content.splitlines():
+                    logger.error(f"  STDERR: {line}")
+            
+            raise core_error
+        
+        # Log any captured output from successful run
+        stdout_content = stdout_buffer.getvalue()
+        stderr_content = stderr_buffer.getvalue()
+        
+        if stdout_content:
+            logger.info("Captured stdout from lightscope_core:")
+            for line in stdout_content.splitlines():
+                logger.info(f"  STDOUT: {line}")
+        
+        if stderr_content:
+            logger.warning("Captured stderr from lightscope_core:")
+            for line in stderr_content.splitlines():
+                logger.warning(f"  STDERR: {line}")
+        
+        # Restore logging configuration if it was changed
+        if logger.handlers != current_handlers or logger.level != current_level:
+            logger.warning("Logging configuration was modified by lightscope_core, restoring...")
+            logger.handlers = current_handlers
+            logger.level = current_level
+        
+        logger.info("=" * 50)
         logger.info("LightScope core exited normally")
         return True
         
