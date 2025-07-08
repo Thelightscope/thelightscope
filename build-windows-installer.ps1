@@ -106,61 +106,36 @@ function Clean-BuildDirectory {
 function Prepare-BuildFiles {
     Write-ColoredOutput "=== Preparing Build Files ===" "Yellow"
     
-    # Create build directory
-    if (-not (Test-Path $BuildDir)) {
-        New-Item -ItemType Directory -Path $BuildDir | Out-Null
-    }
-    if (-not (Test-Path $OutputDir)) {
-        New-Item -ItemType Directory -Path $OutputDir | Out-Null
-    }
-    
-    # Copy core files
-    # Copy the user-level manager files to root directory temporarily for building
-    if (Test-Path "windows-build\lightscope-manager.py") {
-        Copy-Item "windows-build\lightscope-manager.py" "." -Force
-    }
-    if (Test-Path "windows-build\lightscope-manager.bat") {
-        Copy-Item "windows-build\lightscope-manager.bat" "." -Force  
-    }
-    if (Test-Path "windows-build\install-missing-dependencies.py") {
-        Copy-Item "windows-build\install-missing-dependencies.py" "." -Force
-    }
-    if (Test-Path "windows-build\README-USER-INSTALLATION.md") {
-        Copy-Item "windows-build\README-USER-INSTALLATION.md" "." -Force
-    }
+    # Debug output
+    Write-ColoredOutput "Script directory: $ScriptDir" "Cyan"
+    Write-ColoredOutput "Build directory: $BuildDir" "Cyan"
+    Write-ColoredOutput "Output directory: $OutputDir" "Cyan"
 
-    $CoreFiles = @(
-        "lightscope\lightscope_core.py",
-        "lightscope-runner-windows.py", 
-        "lightscope-manager.py",
-        "lightscope-manager.bat",
-        "install-missing-dependencies.py",
-        "README-USER-INSTALLATION.md",
-        "lightscope-installer.nsi"
+    # Make sure build & output dirs exist
+    New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+
+    # Define all required files with their correct source paths
+    $filesToCopy = @(
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope\lightscope_core.py'); name = 'lightscope_core.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-runner-windows.py'); name = 'lightscope-runner-windows.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'install-missing-dependencies.py'); name = 'install-missing-dependencies.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'README-INSTALLATION.md'); name = 'README-INSTALLATION.md'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-installer.nsi'); name = 'lightscope-installer.nsi'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-public.pem'); name = 'lightscope-public.pem'}
     )
-    
-    foreach ($File in $CoreFiles) {
-        $SourcePath = Join-Path $ScriptDir $File
-        $DestPath = Join-Path $BuildDir (Split-Path $File -Leaf)
-        
-        if (Test-Path $SourcePath) {
-            Copy-Item $SourcePath $DestPath
-            Write-ColoredOutput "OK Copied: $File" "Green"
+
+    # Copy all required files
+    foreach ($file in $filesToCopy) {
+        if (Test-Path -Path $file.src) {
+            $dest = Join-Path -Path $BuildDir -ChildPath $file.name
+            Copy-Item -LiteralPath $file.src -Destination $dest -Force
+            Write-ColoredOutput "OK Copied: $($file.name)" "Green"
         } else {
-            Write-ColoredOutput "Warning: File not found: $File" "Yellow"
+            Write-ColoredOutput "ERROR: Required file not found: $($file.src)" "Red"
+            Write-ColoredOutput "This file is required for building the installer." "Red"
+            exit 1
         }
-    }
-    
-    # Copy public key (REQUIRED for secure updates)
-    $PublicKeyPath = Join-Path $ScriptDir "lightscope-public.pem"
-    if (Test-Path $PublicKeyPath) {
-        Copy-Item $PublicKeyPath $BuildDir
-        Write-ColoredOutput "OK Copied: lightscope-public.pem" "Green"
-    } else {
-        Write-ColoredOutput "ERROR: lightscope-public.pem not found!" "Red"
-        Write-ColoredOutput "This file is required for secure updates." "Red"
-        Write-ColoredOutput "Please ensure lightscope-public.pem is in the project root directory." "Red"
-        exit 1
     }
     
     # Create license file if it doesn't exist

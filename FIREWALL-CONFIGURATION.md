@@ -26,7 +26,7 @@ The installer creates three firewall rules:
 #### LightScope Dynamic Ports
 - **Direction**: Inbound
 - **Protocol**: TCP
-- **Ports**: 32768-65535 (Windows ephemeral port range)
+- **Ports**: 1024-65535 (user port range)
 - **Program**: Specific Python executable
 - **Profiles**: Private, Domain (not Public for security)
 - **Purpose**: Allows dynamic honeypot services on high ports
@@ -81,7 +81,7 @@ Features:
 
 ### Port Selection
 - **Honeypot Ports**: Common service ports that attackers typically target
-- **Dynamic Range**: Windows ephemeral ports (32768-65535) for dynamic services
+- **Dynamic Range**: User ports (1024-65535) for dynamic services
 - **Avoided Ports**: No rules for system-critical ports below 1024 except common honeypot services
 
 ## Installation Impact

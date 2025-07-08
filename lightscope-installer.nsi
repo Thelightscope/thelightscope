@@ -247,11 +247,11 @@ Function ConfigureFirewall
   Pop $0
   FileWrite $9 "Honeypot firewall rule creation exit code: $0$\r$\n"
   
-  ; Create firewall rule for dynamic port range (ephemeral ports)
+  ; Create firewall rule for dynamic port range (user ports)
   DetailPrint "Creating firewall rule for dynamic ports..."
   FileWrite $9 "Creating firewall rule for dynamic port range...$\r$\n"
   
-  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -Direction Inbound -Protocol TCP -LocalPort 32768-65535 -Program \"$1\" -Action Allow -Profile Private,Domain -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program \"$1\" -Action Allow -Profile Private,Domain -ErrorAction SilentlyContinue"'
   Pop $0
   FileWrite $9 "Dynamic ports firewall rule creation exit code: $0$\r$\n"
   

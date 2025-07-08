@@ -108,7 +108,7 @@ function Create-LightScopeFirewallRules {
         
         # Create dynamic ports rule
         Write-Host "Creating dynamic ports rule..." -ForegroundColor Yellow
-        New-NetFirewallRule -DisplayName "LightScope Dynamic Ports" -Direction Inbound -Protocol TCP -LocalPort 32768-65535 -Program $PythonPath -Action Allow -Profile Private,Domain -ErrorAction Stop
+        New-NetFirewallRule -DisplayName "LightScope Dynamic Ports" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $PythonPath -Action Allow -Profile Private,Domain -ErrorAction Stop
         Write-Host "✓ Dynamic ports rule created" -ForegroundColor Green
         
         # Create outbound rule
