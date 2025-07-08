@@ -5,8 +5,35 @@ This script handles version checking, secure updates, and launching the main Lig
 Designed to run as a user-level startup application without requiring administrator privileges.
 """
 
+# Hide console window when running with python.exe (instead of pythonw.exe)
 import os
 import sys
+
+# Check if we should hide the console window
+HIDE_CONSOLE = os.environ.get('LIGHTSCOPE_HIDE_CONSOLE', 'true').lower() == 'true'
+
+if HIDE_CONSOLE and sys.platform.startswith('win'):
+    try:
+        import ctypes
+        import ctypes.wintypes
+        
+        # Get the console window handle
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        
+        # Get console window
+        console_window = kernel32.GetConsoleWindow()
+        
+        if console_window != 0:
+            # Hide the console window (SW_HIDE = 0)
+            user32.ShowWindow(console_window, 0)
+            print("Console window hidden successfully")
+        else:
+            print("No console window found to hide")
+            
+    except Exception as e:
+        print(f"Could not hide console window: {e}")
+
 import time
 import json
 import hashlib
