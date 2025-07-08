@@ -35,21 +35,13 @@ except Exception as e:
 # Configuration
 # Dynamically determine installation directory based on script location
 SCRIPT_DIR = Path(__file__).parent.absolute()
-# If running from bin subdirectory, parent is LIGHTSCOPE_HOME
-if SCRIPT_DIR.name == "bin":
-    LIGHTSCOPE_HOME = SCRIPT_DIR.parent
-else:
-    # If running from root directory, use current directory
-    LIGHTSCOPE_HOME = SCRIPT_DIR
+LIGHTSCOPE_HOME = SCRIPT_DIR
 
 CONFIG_DIR = LIGHTSCOPE_HOME / "config"
 UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
 LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+# BIN_DIR is kept for backward compatibility but files are now in LIGHTSCOPE_HOME
 BIN_DIR = LIGHTSCOPE_HOME / "bin"
-
-# If BIN_DIR doesn't exist, we're probably running from the root directory
-if not BIN_DIR.exists():
-    BIN_DIR = LIGHTSCOPE_HOME
 
 UPDATE_CHECK_URL = "https://thelightscope.com/latest/version"
 DOWNLOAD_URL_BASE = "https://thelightscope.com/latest"
@@ -97,8 +89,19 @@ class SecureUpdater:
     def load_current_version(self):
         """Load current version from lightscope_core.py"""
         try:
-            core_path = BIN_DIR / "lightscope_core.py"
-            if core_path.exists():
+            # Try to find lightscope_core.py in the correct location
+            possible_paths = [
+                LIGHTSCOPE_HOME / "lightscope_core.py",
+                BIN_DIR / "lightscope_core.py",  # Legacy location
+            ]
+            
+            core_path = None
+            for path in possible_paths:
+                if path.exists():
+                    core_path = path
+                    break
+            
+            if core_path:
                 with open(core_path, 'r') as f:
                     content = f.read()
                     # Extract version from ls_version = "x.x.x" line
@@ -232,17 +235,32 @@ class SecureUpdater:
                     else:
                         logger.warning("Proceeding with update without signature verification (user mode)")
                 
-                # Backup current version
-                current_core = BIN_DIR / "lightscope_core.py"
+                # Backup current version (check both locations)
+                current_core = LIGHTSCOPE_HOME / "lightscope_core.py"
+                legacy_core = BIN_DIR / "lightscope_core.py"
+                
                 if current_core.exists():
                     backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
                     import shutil
                     shutil.copy2(current_core, backup_path)
                     logger.info(f"Backed up current version to {backup_path}")
+                elif legacy_core.exists():
+                    backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
+                    import shutil
+                    shutil.copy2(legacy_core, backup_path)
+                    logger.info(f"Backed up legacy version to {backup_path}")
                 
-                # Install new version
+                # Install new version to root directory
                 import shutil
                 shutil.copy2(core_temp_path, current_core)
+                
+                # Clean up legacy location if it exists
+                if legacy_core.exists():
+                    try:
+                        legacy_core.unlink()
+                        logger.info("Removed legacy copy from bin directory")
+                    except Exception as e:
+                        logger.warning(f"Could not remove legacy copy: {e}")
                 
                 logger.info("Update installed successfully")
                 
@@ -401,9 +419,9 @@ def load_lightscope_core():
     try:
         # Try to find lightscope_core.py in multiple locations
         possible_paths = [
-            BIN_DIR / "lightscope_core.py",
             LIGHTSCOPE_HOME / "lightscope_core.py",
             SCRIPT_DIR / "lightscope_core.py",
+            BIN_DIR / "lightscope_core.py",  # Legacy location (for backward compatibility)
         ]
         
         core_path = None
@@ -609,7 +627,6 @@ def main():
     logger.info(f"Script directory: {SCRIPT_DIR}")
     logger.info(f"LightScope home: {LIGHTSCOPE_HOME}")
     logger.info(f"Config directory: {CONFIG_DIR}")
-    logger.info(f"Bin directory: {BIN_DIR}")
     logger.info(f"Logs directory: {LOGS_DIR}")
     logger.info(f"User mode: {USER_MODE}")
     

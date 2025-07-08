@@ -19,8 +19,8 @@ InstallDirRegKey HKCU "${PRODUCT_DIR_REGKEY}" ""
 ShowInstDetails show
 ShowUnInstDetails show
 
-; Request user privileges only (no admin required)
-RequestExecutionLevel user
+; Request admin privileges for firewall configuration
+RequestExecutionLevel admin
 
 ; Modern UI
 !include "MUI2.nsh"
@@ -217,6 +217,61 @@ Function CheckNpcap
     FileWrite $9 "NPCAP dependency check completed successfully$\r$\n"
 FunctionEnd
 
+Function ConfigureFirewall
+  ; Configure Windows Firewall to allow LightScope honeypot traffic
+  DetailPrint "Configuring Windows Firewall for LightScope..."
+  FileWrite $9 "$\r$\n=== Configuring Windows Firewall ===$\r$\n"
+  
+  ; Check which Python executable we're using
+  ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
+    StrCpy $1 "$INSTDIR\venv\Scripts\python.exe"
+    FileWrite $9 "Using virtual environment Python: $1$\r$\n"
+  ${Else}
+    ; Try to find system Python
+    nsExec::ExecToStack 'where python'
+    Pop $0
+    Pop $1
+    ${If} $0 == 0
+      FileWrite $9 "Using system Python: $1$\r$\n"
+    ${Else}
+      StrCpy $1 "python.exe"
+      FileWrite $9 "Using default python.exe path$\r$\n"
+    ${EndIf}
+  ${EndIf}
+  
+  ; Create firewall rule for inbound honeypot connections
+  DetailPrint "Creating firewall rule for honeypot services..."
+  FileWrite $9 "Creating firewall rule for Python executable: $1$\r$\n"
+  
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Honeypot Services\" -Direction Inbound -Protocol TCP -LocalPort 21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443 -Program \"$1\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  Pop $0
+  FileWrite $9 "Honeypot firewall rule creation exit code: $0$\r$\n"
+  
+  ; Create firewall rule for dynamic port range (ephemeral ports)
+  DetailPrint "Creating firewall rule for dynamic ports..."
+  FileWrite $9 "Creating firewall rule for dynamic port range...$\r$\n"
+  
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -Direction Inbound -Protocol TCP -LocalPort 32768-65535 -Program \"$1\" -Action Allow -Profile Private,Domain -ErrorAction SilentlyContinue"'
+  Pop $0
+  FileWrite $9 "Dynamic ports firewall rule creation exit code: $0$\r$\n"
+  
+  ; Create outbound rule for LightScope communication
+  DetailPrint "Creating outbound firewall rule..."
+  FileWrite $9 "Creating outbound firewall rule...$\r$\n"
+  
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Outbound\" -Direction Outbound -Protocol TCP -Program \"$1\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  Pop $0
+  FileWrite $9 "Outbound firewall rule creation exit code: $0$\r$\n"
+  
+  ${If} $0 == 0
+    DetailPrint "✓ Windows Firewall configured successfully"
+    FileWrite $9 "Firewall configuration completed successfully$\r$\n"
+  ${Else}
+    DetailPrint "⚠ Firewall configuration may have encountered issues"
+    FileWrite $9 "Firewall configuration completed with warnings$\r$\n"
+  ${EndIf}
+FunctionEnd
+
 ;--------------------------------
 ; Installer Sections
 
@@ -240,27 +295,18 @@ Section "Core Files" SEC01
   
   FileWrite $9 "=== Installing Core Files ===$\r$\n"
   
-  ; Install core files
+  ; Install core files directly to root directory
   FileWrite $9 "Installing Python files...$\r$\n"
-  File "lightscope_core.py"
-  File "lightscope-runner-windows.py"
+  File "/oname=$INSTDIR\lightscope_core.py" "lightscope_core.py"
+  File "/oname=$INSTDIR\lightscope-runner-windows.py" "lightscope-runner-windows.py"
   FileWrite $9 "Core files installed successfully$\r$\n"
   
   ; Create directories
   FileWrite $9 "Creating directories...$\r$\n"
-  CreateDirectory "$INSTDIR\bin"
   CreateDirectory "$INSTDIR\config"
   CreateDirectory "$INSTDIR\logs"
   CreateDirectory "$INSTDIR\updates"
   FileWrite $9 "Directories created successfully$\r$\n"
-  
-  ; Copy files to bin directory
-  CopyFiles "$INSTDIR\lightscope_core.py" "$INSTDIR\bin\"
-  CopyFiles "$INSTDIR\lightscope-runner-windows.py" "$INSTDIR\bin\"
-  
-  ; Also keep copies in root directory for flexibility
-  File "/oname=$INSTDIR\lightscope_core.py" "lightscope_core.py"
-  File "/oname=$INSTDIR\lightscope-runner-windows.py" "lightscope-runner-windows.py"
   
   ; Copy public key (REQUIRED for secure updates)
   File "/oname=$INSTDIR\config\lightscope-public.pem" "lightscope-public.pem"
@@ -379,6 +425,9 @@ Section "Core Files" SEC01
     DetailPrint "✓ Python dependencies installed successfully"
     FileWrite $9 "Python dependencies installed successfully$\r$\n"
   ${EndIf}
+  
+  ; Configure Windows Firewall for LightScope
+  Call ConfigureFirewall
   
   ; Create startup launcher batch file
   DetailPrint "Creating startup launcher..."
@@ -524,7 +573,7 @@ Section -Post
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
   
   ; Show final installation summary
-  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running in background$\r$\n✓ Will start automatically when you log in$\r$\n✓ No administrator privileges required$\r$\n✓ No visible command prompt window$\r$\n$\r$\nManual launchers available in:$\r$\n$INSTDIR$\r$\n$\r$\nView logs: $INSTDIR\logs\$\r$\nManage via Start Menu shortcuts"
+  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running in background$\r$\n✓ Will start automatically when you log in$\r$\n✓ Windows Firewall configured for honeypot services$\r$\n✓ No visible command prompt window$\r$\n$\r$\nManual launchers available in:$\r$\n$INSTDIR$\r$\n$\r$\nView logs: $INSTDIR\logs\$\r$\nManage via Start Menu shortcuts"
 SectionEnd
 
 ;--------------------------------
@@ -549,14 +598,18 @@ Section Uninstall
   ; Also try to kill any specific LightScope processes
   nsExec::ExecToLog 'taskkill /F /IM lightscope-runner-windows.py /T'
   
+  ; Remove Windows Firewall rules
+  DetailPrint "Removing Windows Firewall rules..."
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Honeypot Services\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Outbound\" -ErrorAction SilentlyContinue"'
+  
   ; Remove startup entries
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope"
   Delete "$SMSTARTUP\LightScope.lnk"
   
   ; Remove files
   Delete "$INSTDIR\uninst.exe"
-  Delete "$INSTDIR\bin\lightscope_core.py"
-  Delete "$INSTDIR\bin\lightscope-runner-windows.py"
   Delete "$INSTDIR\lightscope_core.py"
   Delete "$INSTDIR\lightscope-runner-windows.py"
   Delete "$INSTDIR\start-lightscope.bat"
@@ -572,7 +625,6 @@ Section Uninstall
   RMDir "$SMPROGRAMS\LightScope"
   
   ; Remove directories (only if empty)
-  RMDir "$INSTDIR\bin"
   RMDir "$INSTDIR\config"
   RMDir /r "$INSTDIR\logs"
   RMDir /r "$INSTDIR\updates"
