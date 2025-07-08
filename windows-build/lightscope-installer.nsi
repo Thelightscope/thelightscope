@@ -295,18 +295,25 @@ Section "Core Files" SEC01
   
   FileWrite $9 "=== Installing Core Files ===$\r$\n"
   
-  ; Install core files directly to root directory
+  ; Install core files to root directory and bin directory
   FileWrite $9 "Installing Python files...$\r$\n"
   File "/oname=$INSTDIR\lightscope_core.py" "lightscope_core.py"
   File "/oname=$INSTDIR\lightscope-runner-windows.py" "lightscope-runner-windows.py"
-  FileWrite $9 "Core files installed successfully$\r$\n"
+  FileWrite $9 "Core files installed successfully (lightscope_core.py from authoritative source)$\r$\n"
   
   ; Create directories
   FileWrite $9 "Creating directories...$\r$\n"
+  CreateDirectory "$INSTDIR\bin"
   CreateDirectory "$INSTDIR\config"
   CreateDirectory "$INSTDIR\logs"
   CreateDirectory "$INSTDIR\updates"
   FileWrite $9 "Directories created successfully$\r$\n"
+  
+  ; Copy files to bin directory (where the runner expects them)
+  FileWrite $9 "Copying files to bin directory...$\r$\n"
+  CopyFiles "$INSTDIR\lightscope_core.py" "$INSTDIR\bin\"
+  CopyFiles "$INSTDIR\lightscope-runner-windows.py" "$INSTDIR\bin\"
+  FileWrite $9 "Files copied to bin directory successfully$\r$\n"
   
   ; Copy public key (REQUIRED for secure updates)
   File "/oname=$INSTDIR\config\lightscope-public.pem" "lightscope-public.pem"
@@ -610,6 +617,8 @@ Section Uninstall
   
   ; Remove files
   Delete "$INSTDIR\uninst.exe"
+  Delete "$INSTDIR\bin\lightscope_core.py"
+  Delete "$INSTDIR\bin\lightscope-runner-windows.py"
   Delete "$INSTDIR\lightscope_core.py"
   Delete "$INSTDIR\lightscope-runner-windows.py"
   Delete "$INSTDIR\start-lightscope.bat"
@@ -625,6 +634,7 @@ Section Uninstall
   RMDir "$SMPROGRAMS\LightScope"
   
   ; Remove directories (only if empty)
+  RMDir "$INSTDIR\bin"
   RMDir "$INSTDIR\config"
   RMDir /r "$INSTDIR\logs"
   RMDir /r "$INSTDIR\updates"
