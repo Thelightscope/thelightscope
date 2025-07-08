@@ -101,20 +101,39 @@ function Create-LightScopeFirewallRules {
     Write-Host ""
     
     try {
-        # Create honeypot services rule
-        Write-Host "Creating honeypot services rule..." -ForegroundColor Yellow
-        New-NetFirewallRule -DisplayName "LightScope Honeypot Services" -Direction Inbound -Protocol TCP -LocalPort 21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443 -Program $PythonPath -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
-        Write-Host "✓ Honeypot services rule created" -ForegroundColor Green
+        # Find system Python
+        try {
+            $systemPython = (Get-Command python -ErrorAction Stop).Source.Trim()
+        } catch {
+            $systemPython = "python.exe"
+        }
         
-        # Create dynamic ports rule
-        Write-Host "Creating dynamic ports rule..." -ForegroundColor Yellow
-        New-NetFirewallRule -DisplayName "LightScope Dynamic Ports" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $PythonPath -Action Allow -Profile Private,Domain -ErrorAction Stop
-        Write-Host "✓ Dynamic ports rule created" -ForegroundColor Green
+        # Find system pythonw
+        try {
+            $systemPythonw = (Get-Command pythonw -ErrorAction Stop).Source.Trim()
+        } catch {
+            $systemPythonw = "pythonw.exe"
+        }
         
-        # Create outbound rule
-        Write-Host "Creating outbound rule..." -ForegroundColor Yellow
-        New-NetFirewallRule -DisplayName "LightScope Outbound" -Direction Outbound -Protocol TCP -Program $PythonPath -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
-        Write-Host "✓ Outbound rule created" -ForegroundColor Green
+        # Create dynamic ports rule for python
+        Write-Host "Creating dynamic ports rule for Python..." -ForegroundColor Yellow
+        New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Python)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $systemPython -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
+        Write-Host "✓ Dynamic ports rule for Python created" -ForegroundColor Green
+        
+        # Create outbound rule for python
+        Write-Host "Creating outbound rule for Python..." -ForegroundColor Yellow
+        New-NetFirewallRule -DisplayName "LightScope Outbound (Python)" -Direction Outbound -Protocol TCP -Program $systemPython -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
+        Write-Host "✓ Outbound rule for Python created" -ForegroundColor Green
+        
+        # Create dynamic ports rule for pythonw
+        Write-Host "Creating dynamic ports rule for Pythonw..." -ForegroundColor Yellow
+        New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Pythonw)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $systemPythonw -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
+        Write-Host "✓ Dynamic ports rule for Pythonw created" -ForegroundColor Green
+        
+        # Create outbound rule for pythonw
+        Write-Host "Creating outbound rule for Pythonw..." -ForegroundColor Yellow
+        New-NetFirewallRule -DisplayName "LightScope Outbound (Pythonw)" -Direction Outbound -Protocol TCP -Program $systemPythonw -Action Allow -Profile Private,Domain,Public -ErrorAction Stop
+        Write-Host "✓ Outbound rule for Pythonw created" -ForegroundColor Green
         
         Write-Host ""
         Write-Host "All firewall rules created successfully!" -ForegroundColor Green
@@ -136,14 +155,17 @@ function Remove-LightScopeFirewallRules {
     Write-Host ""
     
     try {
-        Remove-NetFirewallRule -DisplayName "LightScope Honeypot Services" -ErrorAction SilentlyContinue
-        Write-Host "✓ Removed honeypot services rule" -ForegroundColor Green
+        Remove-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Python)" -ErrorAction SilentlyContinue
+        Write-Host "✓ Removed dynamic ports rule for Python" -ForegroundColor Green
         
-        Remove-NetFirewallRule -DisplayName "LightScope Dynamic Ports" -ErrorAction SilentlyContinue
-        Write-Host "✓ Removed dynamic ports rule" -ForegroundColor Green
+        Remove-NetFirewallRule -DisplayName "LightScope Outbound (Python)" -ErrorAction SilentlyContinue
+        Write-Host "✓ Removed outbound rule for Python" -ForegroundColor Green
         
-        Remove-NetFirewallRule -DisplayName "LightScope Outbound" -ErrorAction SilentlyContinue
-        Write-Host "✓ Removed outbound rule" -ForegroundColor Green
+        Remove-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Pythonw)" -ErrorAction SilentlyContinue
+        Write-Host "✓ Removed dynamic ports rule for Pythonw" -ForegroundColor Green
+        
+        Remove-NetFirewallRule -DisplayName "LightScope Outbound (Pythonw)" -ErrorAction SilentlyContinue
+        Write-Host "✓ Removed outbound rule for Pythonw" -ForegroundColor Green
         
         Write-Host ""
         Write-Host "All firewall rules removed successfully!" -ForegroundColor Green

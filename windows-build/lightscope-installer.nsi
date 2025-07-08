@@ -25,6 +25,11 @@ RequestExecutionLevel admin
 ; Modern UI
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "StrFunc.nsh"
+
+; String functions
+${StrRep}
+${StrTrimNewLines}
 
 ; Interface Settings
 !define MUI_ABORTWARNING
@@ -222,46 +227,61 @@ Function ConfigureFirewall
   DetailPrint "Configuring Windows Firewall for LightScope..."
   FileWrite $9 "$\r$\n=== Configuring Windows Firewall ===$\r$\n"
   
-  ; Check which Python executable we're using
-  ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
-    StrCpy $1 "$INSTDIR\venv\Scripts\python.exe"
-    FileWrite $9 "Using virtual environment Python: $1$\r$\n"
+  ; Find system Python executable
+  nsExec::ExecToStack 'where python'
+  Pop $0
+  Pop $1
+  ${If} $0 == 0
+    ; Strip newlines and whitespace from the path
+    ${StrRep} $1 $1 "$\r" ""
+    ${StrRep} $1 $1 "$\n" ""
+    ${StrTrimNewLines} $1 $1
+    FileWrite $9 "Found system Python: $1$\r$\n"
+    StrCpy $2 "$1"  ; Store system python path
   ${Else}
-    ; Try to find system Python
-    nsExec::ExecToStack 'where python'
-    Pop $0
-    Pop $1
-    ${If} $0 == 0
-      FileWrite $9 "Using system Python: $1$\r$\n"
-    ${Else}
-      StrCpy $1 "python.exe"
-      FileWrite $9 "Using default python.exe path$\r$\n"
-    ${EndIf}
+    StrCpy $2 "python.exe"  ; Fallback
+    FileWrite $9 "Using default python.exe path$\r$\n"
   ${EndIf}
   
-  ; Create firewall rule for inbound honeypot connections
-  DetailPrint "Creating firewall rule for honeypot services..."
-  FileWrite $9 "Creating firewall rule for Python executable: $1$\r$\n"
-  
-  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Honeypot Services\" -Direction Inbound -Protocol TCP -LocalPort 21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443 -Program \"$1\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  ; Find system pythonw executable
+  nsExec::ExecToStack 'where pythonw'
   Pop $0
-  FileWrite $9 "Honeypot firewall rule creation exit code: $0$\r$\n"
+  Pop $1
+  ${If} $0 == 0
+    ; Strip newlines and whitespace from the path
+    ${StrRep} $1 $1 "$\r" ""
+    ${StrRep} $1 $1 "$\n" ""
+    ${StrTrimNewLines} $1 $1
+    FileWrite $9 "Found system pythonw: $1$\r$\n"
+    StrCpy $3 "$1"  ; Store system pythonw path
+  ${Else}
+    StrCpy $3 "pythonw.exe"  ; Fallback
+    FileWrite $9 "Using default pythonw.exe path$\r$\n"
+  ${EndIf}
   
-  ; Create firewall rule for dynamic port range (user ports)
-  DetailPrint "Creating firewall rule for dynamic ports..."
-  FileWrite $9 "Creating firewall rule for dynamic port range...$\r$\n"
+  ; Create firewall rules for system Python
+  DetailPrint "Creating firewall rules for system Python..."
+  FileWrite $9 "Creating firewall rules for system Python: $2$\r$\n"
   
-  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program \"$1\" -Action Allow -Profile Private,Domain -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports (Python)\" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program \"$2\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
   Pop $0
-  FileWrite $9 "Dynamic ports firewall rule creation exit code: $0$\r$\n"
+  FileWrite $9 "Python dynamic ports firewall rule creation exit code: $0$\r$\n"
   
-  ; Create outbound rule for LightScope communication
-  DetailPrint "Creating outbound firewall rule..."
-  FileWrite $9 "Creating outbound firewall rule...$\r$\n"
-  
-  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Outbound\" -Direction Outbound -Protocol TCP -Program \"$1\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Outbound (Python)\" -Direction Outbound -Protocol TCP -Program \"$2\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
   Pop $0
-  FileWrite $9 "Outbound firewall rule creation exit code: $0$\r$\n"
+  FileWrite $9 "Python outbound firewall rule creation exit code: $0$\r$\n"
+  
+  ; Create firewall rules for system pythonw
+  DetailPrint "Creating firewall rules for system pythonw..."
+  FileWrite $9 "Creating firewall rules for system pythonw: $3$\r$\n"
+  
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Dynamic Ports (Pythonw)\" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program \"$3\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  Pop $0
+  FileWrite $9 "Pythonw dynamic ports firewall rule creation exit code: $0$\r$\n"
+  
+  nsExec::ExecToLog 'powershell -Command "New-NetFirewallRule -DisplayName \"LightScope Outbound (Pythonw)\" -Direction Outbound -Protocol TCP -Program \"$3\" -Action Allow -Profile Private,Domain,Public -ErrorAction SilentlyContinue"'
+  Pop $0
+  FileWrite $9 "Pythonw outbound firewall rule creation exit code: $0$\r$\n"
   
   ${If} $0 == 0
     DetailPrint "✓ Windows Firewall configured successfully"
@@ -607,9 +627,10 @@ Section Uninstall
   
   ; Remove Windows Firewall rules
   DetailPrint "Removing Windows Firewall rules..."
-  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Honeypot Services\" -ErrorAction SilentlyContinue"'
-  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Dynamic Ports\" -ErrorAction SilentlyContinue"'
-  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Outbound\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Dynamic Ports (Python)\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Outbound (Python)\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Dynamic Ports (Pythonw)\" -ErrorAction SilentlyContinue"'
+  nsExec::ExecToLog 'powershell -Command "Remove-NetFirewallRule -DisplayName \"LightScope Outbound (Pythonw)\" -ErrorAction SilentlyContinue"'
   
   ; Remove startup entries
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope"

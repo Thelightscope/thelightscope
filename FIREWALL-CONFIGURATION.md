@@ -13,37 +13,46 @@ LightScope now includes automatic Windows Firewall configuration during installa
 
 ### 2. Firewall Rules Created
 
-The installer creates three firewall rules:
+The installer creates four firewall rules:
 
-#### LightScope Honeypot Services
-- **Direction**: Inbound
-- **Protocol**: TCP
-- **Ports**: 21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443
-- **Program**: Specific Python executable (virtual environment or system Python)
-- **Profiles**: Private, Domain, Public
-- **Purpose**: Allows common honeypot services to receive connections
-
-#### LightScope Dynamic Ports
+#### LightScope Dynamic Ports (Python)
 - **Direction**: Inbound
 - **Protocol**: TCP
 - **Ports**: 1024-65535 (user port range)
-- **Program**: Specific Python executable
-- **Profiles**: Private, Domain (not Public for security)
-- **Purpose**: Allows dynamic honeypot services on high ports
+- **Program**: System Python executable (python.exe)
+- **Profiles**: Private, Domain, Public
+- **Purpose**: Allows LightScope services to receive connections on user ports
 
-#### LightScope Outbound
+#### LightScope Outbound (Python)
 - **Direction**: Outbound
 - **Protocol**: TCP
-- **Program**: Specific Python executable
+- **Program**: System Python executable (python.exe)
+- **Profiles**: Private, Domain, Public
+- **Purpose**: Allows LightScope to communicate with external servers
+
+#### LightScope Dynamic Ports (Pythonw)
+- **Direction**: Inbound
+- **Protocol**: TCP
+- **Ports**: 1024-65535 (user port range)
+- **Program**: System Python windowed executable (pythonw.exe)
+- **Profiles**: Private, Domain, Public
+- **Purpose**: Allows LightScope services to receive connections on user ports
+
+#### LightScope Outbound (Pythonw)
+- **Direction**: Outbound
+- **Protocol**: TCP
+- **Program**: System Python windowed executable (pythonw.exe)
 - **Profiles**: Private, Domain, Public
 - **Purpose**: Allows LightScope to communicate with external servers
 
 ### 3. Python Executable Detection
 
 The installer intelligently detects and configures firewall rules for:
-1. **Virtual Environment Python**: `%LOCALAPPDATA%\LightScope\venv\Scripts\python.exe` (preferred)
-2. **System Python**: Found via `where python` command
-3. **Fallback**: Generic `python.exe` if specific path not found
+1. **System Python**: Found via `where python` command (with newlines stripped)
+2. **System Python Windowed**: Found via `where pythonw` command (with newlines stripped)
+3. **Fallback**: Generic `python.exe` and `pythonw.exe` if specific paths not found
+
+**Note**: The installer automatically strips newlines and whitespace from detected Python paths to prevent firewall rule corruption.
 
 ### 4. Installation Process
 
@@ -75,14 +84,12 @@ Features:
 ## Security Considerations
 
 ### Firewall Rule Scope
-- **Common Ports**: Allowed on all profiles (Private, Domain, Public)
-- **Dynamic Ports**: Limited to Private and Domain profiles only
+- **Dynamic Ports**: Allowed on all profiles (Private, Domain, Public)
 - **Program-Specific**: Rules target specific Python executable, not all Python processes
 
 ### Port Selection
-- **Honeypot Ports**: Common service ports that attackers typically target
-- **Dynamic Range**: User ports (1024-65535) for dynamic services
-- **Avoided Ports**: No rules for system-critical ports below 1024 except common honeypot services
+- **Dynamic Range**: User ports (1024-65535) for all LightScope services
+- **Avoided Ports**: No rules for system-critical ports below 1024
 
 ## Installation Impact
 
@@ -106,20 +113,58 @@ Get-NetFirewallRule -DisplayName "*LightScope*" | Format-Table DisplayName, Dire
 
 ### Test Port Connectivity
 ```powershell
-# Test if port 22 is accessible
-Test-NetConnection -ComputerName localhost -Port 22
+# Test if a port in the dynamic range is accessible
+Test-NetConnection -ComputerName localhost -Port 8080
+```
+
+### Check for Corrupted Firewall Rules
+If firewall rules appear to exist but don't work, check for path corruption:
+```powershell
+# Check if firewall rule paths have illegal characters
+Get-NetFirewallRule -DisplayName "*LightScope*" | ForEach-Object {
+    $appFilter = $_ | Get-NetFirewallApplicationFilter
+    $path = $appFilter.Program
+    $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($path)
+    $hasNewlines = ($pathBytes -contains 13) -or ($pathBytes -contains 10)
+    Write-Host "$($_.DisplayName): Path has newlines = $hasNewlines"
+    if ($hasNewlines) {
+        Write-Host "  CORRUPTED RULE - needs to be recreated"
+    }
+}
+```
+
+### Fix Corrupted Firewall Rules
+If you find corrupted rules (containing newlines), remove and recreate them:
+```powershell
+# Remove corrupted rules
+Remove-NetFirewallRule -DisplayName "*LightScope*"
+
+# Recreate with clean paths
+$pythonPath = (Get-Command python).Source.Trim()
+$pythonwPath = (Get-Command pythonw).Source.Trim()
+
+New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Python)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $pythonPath -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Outbound (Python)" -Direction Outbound -Protocol TCP -Program $pythonPath -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Pythonw)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program $pythonwPath -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Outbound (Pythonw)" -Direction Outbound -Protocol TCP -Program $pythonwPath -Action Allow -Profile Private,Domain,Public
 ```
 
 ### Manual Rule Creation
 ```powershell
-# Create rule for specific Python executable
-New-NetFirewallRule -DisplayName "LightScope Honeypot Services" -Direction Inbound -Protocol TCP -LocalPort 22,23,80,443 -Program "C:\Path\To\python.exe" -Action Allow -Profile Private,Domain,Public
+# Create rules for system Python executables
+New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Python)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program "C:\Path\To\python.exe" -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Outbound (Python)" -Direction Outbound -Protocol TCP -Program "C:\Path\To\python.exe" -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Pythonw)" -Direction Inbound -Protocol TCP -LocalPort 1024-65535 -Program "C:\Path\To\pythonw.exe" -Action Allow -Profile Private,Domain,Public
+New-NetFirewallRule -DisplayName "LightScope Outbound (Pythonw)" -Direction Outbound -Protocol TCP -Program "C:\Path\To\pythonw.exe" -Action Allow -Profile Private,Domain,Public
 ```
 
 ### Remove Rules
 ```powershell
 # Remove all LightScope firewall rules
-Remove-NetFirewallRule -DisplayName "*LightScope*"
+Remove-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Python)"
+Remove-NetFirewallRule -DisplayName "LightScope Outbound (Python)"
+Remove-NetFirewallRule -DisplayName "LightScope Dynamic Ports (Pythonw)"
+Remove-NetFirewallRule -DisplayName "LightScope Outbound (Pythonw)"
 ```
 
 ## File Changes
