@@ -68,7 +68,83 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "OriginalFilename" "LightScope-${PRODUCT_V
 ; Functions
 
 Function .onInit
-  ; Check if already installed
+  ; Check dependencies FIRST, before any installer UI is shown
+  ; This ensures users are notified immediately if requirements are missing
+  
+  ; Create a temporary log file for dependency check
+  FileOpen $9 "$TEMP\lightscope-dependency-check.log" w
+  FileWrite $9 "=== LightScope Dependency Check ===$\r$\n"
+  FileWrite $9 "Check started at: $\r$\n"
+  
+  ; Check Python first
+  DetailPrint "Checking for Python..."
+  FileWrite $9 "=== Python Dependency Check ===$\r$\n"
+  
+  ; Check if Python is available
+  ClearErrors
+  nsExec::ExecToStack 'python --version'
+  Pop $0 ; exit code
+  Pop $1 ; output
+  FileWrite $9 "Python check exit code: $0, output: $1$\r$\n"
+  
+  ${If} $0 != 0
+    ; Try python3 command
+    nsExec::ExecToStack 'python3 --version'
+    Pop $0 ; exit code
+    Pop $1 ; output
+    FileWrite $9 "Python3 check exit code: $0, output: $1$\r$\n"
+  ${EndIf}
+  
+  ${If} $0 != 0
+    ; Python not found
+    FileWrite $9 "ERROR: Python not found after all checks!$\r$\n"
+    FileClose $9
+    MessageBox MB_OK "Python 3.8+ is REQUIRED for LightScope but was not found on your system.$\r$\n$\r$\nPlease install Python 3.8 or newer from:$\r$\nhttps://www.python.org/downloads/$\r$\n$\r$\nIMPORTANT: During installation, make sure to check 'Add Python to PATH'$\r$\n$\r$\nAfter installing Python, restart this installer." /SD IDOK
+    ExecShell "open" "https://www.python.org/downloads/"
+    Abort
+  ${EndIf}
+  
+  FileWrite $9 "Python found successfully: $1$\r$\n"
+  
+  ; Check NPCAP next
+  DetailPrint "Checking for NPCAP..."
+  FileWrite $9 "=== NPCAP Dependency Check ===$\r$\n"
+  
+  ; Check registry for NPCAP
+  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
+  FileWrite $9 "NPCAP registry check: $0$\r$\n"
+  ${If} $0 != ""
+    FileWrite $9 "NPCAP found via registry: $0$\r$\n"
+    Goto npcap_found
+  ${EndIf}
+  
+  ; Check for NPCAP DLL files
+  ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
+    FileWrite $9 "NPCAP DLL found: $WINDIR\System32\npcap.dll$\r$\n"
+    Goto npcap_found
+  ${EndIf}
+  
+  ${If} ${FileExists} "$WINDIR\System32\wpcap.dll"
+    FileWrite $9 "WPCAP DLL found: $WINDIR\System32\wpcap.dll$\r$\n"
+    Goto npcap_found
+  ${EndIf}
+  
+  ; NPCAP not found
+  FileWrite $9 "ERROR: NPCAP not found - installation cannot continue!$\r$\n"
+  FileClose $9
+  MessageBox MB_OK "NPCAP is REQUIRED for LightScope but was not found on your system.$\r$\n$\r$\nPlease install NPCAP from:$\r$\nhttps://nmap.org/npcap/$\r$\n$\r$\nIMPORTANT: During installation, make sure to check 'Install Npcap in WinPcap API-compatible Mode'$\r$\n$\r$\nAfter installing NPCAP, restart this installer." /SD IDOK
+  ExecShell "open" "https://nmap.org/npcap/"
+  Abort
+  
+  npcap_found:
+  FileWrite $9 "NPCAP dependency check completed successfully$\r$\n"
+  
+  ; Close dependency check log
+  FileWrite $9 "=== All Dependencies Found ===$\r$\n"
+  FileWrite $9 "Proceeding with installation...$\r$\n"
+  FileClose $9
+  
+  ; Now check if already installed (original functionality)
   ReadRegStr $R0 ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString"
   StrCmp $R0 "" done
   
@@ -86,141 +162,9 @@ Function .onInit
   done:
 FunctionEnd
 
-Function CheckPython
-  ; Check if Python is installed
-  DetailPrint "Checking Python Installation..."
-  FileWrite $9 "=== Python Dependency Check ===$\r$\n"
-  
-  ; Check if Python is available
-  ClearErrors
-  nsExec::ExecToStack 'python --version'
-  Pop $0 ; exit code
-  Pop $1 ; output
-  FileWrite $9 "Python check exit code: $0, output: $1$\r$\n"
-  
-  ${If} $0 == 0
-    DetailPrint "Found Python: $1"
-    FileWrite $9 "Python found successfully: $1$\r$\n"
-    Goto python_found
-  ${EndIf}
-  
-  ; Try python3 command
-  nsExec::ExecToStack 'python3 --version'
-  Pop $0 ; exit code
-  Pop $1 ; output
-  
-  ${If} $0 == 0
-    DetailPrint "Found Python3: $1"
-    FileWrite $9 "Python3 found successfully: $1$\r$\n"
-    Goto python_found
-  ${EndIf}
-  
-  ; Python not found
-  DetailPrint "ERROR: Python 3.8+ is required but not found!"
-  FileWrite $9 "ERROR: Python not found after all checks!$\r$\n"
-  MessageBox MB_YESNO "Python 3.8+ is required. Install Python now?" IDYES download_python IDNO abort_install
-  
-  download_python:
-    DetailPrint "Opening Python download page..."
-    FileWrite $9 "Opening Python download page...$\r$\n"
-    ExecShell "open" "https://www.python.org/downloads/"
-    
-    python_retry_loop:
-      MessageBox MB_YESNO "Install Python with 'Add to PATH' option, then click YES when done or NO to abort installation." IDYES recheck_python IDNO abort_install
-      
-    recheck_python:
-      ClearErrors
-      nsExec::ExecToStack 'python --version'
-      Pop $0
-      ${If} $0 == 0
-        DetailPrint "Python successfully detected after installation!"
-        Goto python_found
-      ${EndIf}
-      
-      nsExec::ExecToStack 'python3 --version'
-      Pop $0
-      ${If} $0 == 0
-        DetailPrint "Python3 successfully detected after installation!"
-        Goto python_found
-      ${EndIf}
-      
-      MessageBox MB_YESNO "Python not found. Try again?" IDYES python_retry_loop IDNO abort_install
-      
-  abort_install:
-    DetailPrint "Installation aborted - Python is required"
-    FileWrite $9 "Installation aborted - Python is required$\r$\n"
-    Abort
-  
-  python_found:
-    DetailPrint "✓ Python is available"
-    FileWrite $9 "Python dependency check completed successfully$\r$\n"
-FunctionEnd
 
-Function CheckNpcap
-  ; Check if NPCAP is installed (REQUIRED - no fallback)
-  DetailPrint "Checking for NPCAP installation..."
-  FileWrite $9 "=== NPCAP Dependency Check ===$\r$\n"
-  
-  ; Check registry for NPCAP
-  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
-  FileWrite $9 "NPCAP registry check: $0$\r$\n"
-  ${If} $0 != ""
-    DetailPrint "Found NPCAP: $0"
-    FileWrite $9 "NPCAP found: $0$\r$\n"
-    Goto npcap_found
-  ${EndIf}
-  
-  ; Check for NPCAP DLL files
-  ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
-    DetailPrint "Found NPCAP DLL: $WINDIR\System32\npcap.dll"
-    FileWrite $9 "NPCAP DLL found: $WINDIR\System32\npcap.dll$\r$\n"
-    Goto npcap_found
-  ${EndIf}
-  
-  ${If} ${FileExists} "$WINDIR\System32\wpcap.dll"
-    DetailPrint "Found WPCAP DLL: $WINDIR\System32\wpcap.dll"
-    FileWrite $9 "WPCAP DLL found: $WINDIR\System32\wpcap.dll$\r$\n"
-    Goto npcap_found
-  ${EndIf}
-  
-  ; NPCAP not found - ABORT installation
-  DetailPrint "ERROR: NPCAP is required but not found!"
-  FileWrite $9 "ERROR: NPCAP not found - installation aborted!$\r$\n"
-  MessageBox MB_YESNO "NPCAP is required for LightScope to function. Install NPCAP now?" IDYES download_npcap IDNO abort_install
-  
-  download_npcap:
-    DetailPrint "Opening NPCAP download page..."
-    FileWrite $9 "Opening NPCAP download page...$\r$\n"
-    ExecShell "open" "https://nmap.org/npcap/"
-    
-    npcap_retry_loop:
-      MessageBox MB_YESNO "Install NPCAP with WinPcap compatibility, then click YES when done or NO to abort installation." IDYES recheck_npcap IDNO abort_install
-      
-    recheck_npcap:
-      ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
-      ${If} $0 != ""
-        DetailPrint "NPCAP successfully detected: $0"
-        FileWrite $9 "NPCAP successfully detected: $0$\r$\n"
-        Goto npcap_found
-      ${EndIf}
-      
-      ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
-        DetailPrint "NPCAP DLL successfully detected"
-        FileWrite $9 "NPCAP DLL successfully detected$\r$\n"
-        Goto npcap_found
-      ${EndIf}
-      
-      MessageBox MB_YESNO "NPCAP not found. Try again?" IDYES npcap_retry_loop IDNO abort_install
-      
-  abort_install:
-    DetailPrint "Installation aborted - NPCAP is required"
-    FileWrite $9 "Installation aborted - NPCAP is required$\r$\n"
-    Abort
-  
-  npcap_found:
-    DetailPrint "✓ NPCAP is available"
-    FileWrite $9 "NPCAP dependency check completed successfully$\r$\n"
-FunctionEnd
+
+
 
 Function ConfigureFirewall
   ; Configure Windows Firewall to allow LightScope honeypot traffic
@@ -305,10 +249,8 @@ Section "Core Files" SEC01
   FileWrite $9 "Target directory: $INSTDIR$\r$\n"
   FileWrite $9 "User-level installation (no admin privileges required)$\r$\n"
   
-  ; Check dependencies
-  FileWrite $9 "=== Checking Dependencies ===$\r$\n"
-  Call CheckPython
-  Call CheckNpcap
+  ; Dependencies already checked in .onInit
+  FileWrite $9 "=== Dependencies Already Verified ===$\r$\n"
   
   SetOutPath "$INSTDIR"
   SetOverwrite on
