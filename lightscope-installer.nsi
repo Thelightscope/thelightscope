@@ -99,7 +99,7 @@ Function .onInit
     ; Python not found
     FileWrite $9 "ERROR: Python not found after all checks!$\r$\n"
     FileClose $9
-    MessageBox MB_OK "Python 3.8+ is REQUIRED for LightScope but was not found on your system.$\r$\n$\r$\nPlease install Python 3.8 or newer from:$\r$\nhttps://www.python.org/downloads/$\r$\n$\r$\nIMPORTANT: During installation, make sure to check 'Add Python to PATH'$\r$\n$\r$\nAfter installing Python, restart this installer." /SD IDOK
+    MessageBox MB_OK "Thank you for supporting cybersecurity research and downloading LightScope!$\r$\n$\r$\nLightScope requires Python 3.8+, which we didn't find on your system path. Please download and install Python, make sure ADD TO PATH is selected, and restart this installer.$\r$\n$\r$\nWhen you click $\"Ok$\" we will open a browser where you can download python." /SD IDOK
     ExecShell "open" "https://www.python.org/downloads/"
     Abort
   ${EndIf}
@@ -110,6 +110,7 @@ Function .onInit
   DetailPrint "Checking for NPCAP..."
   FileWrite $9 "=== NPCAP Dependency Check ===$\r$\n"
   
+  npcap_check_loop:
   ; Check registry for NPCAP
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
   FileWrite $9 "NPCAP registry check: $0$\r$\n"
@@ -129,12 +130,44 @@ Function .onInit
     Goto npcap_found
   ${EndIf}
   
-  ; NPCAP not found
-  FileWrite $9 "ERROR: NPCAP not found - installation cannot continue!$\r$\n"
-  FileClose $9
-  MessageBox MB_OK "NPCAP is REQUIRED for LightScope but was not found on your system.$\r$\n$\r$\nPlease install NPCAP from:$\r$\nhttps://nmap.org/npcap/$\r$\n$\r$\nIMPORTANT: During installation, make sure to check 'Install Npcap in WinPcap API-compatible Mode'$\r$\n$\r$\nAfter installing NPCAP, restart this installer." /SD IDOK
-  ExecShell "open" "https://nmap.org/npcap/"
-  Abort
+  ; NPCAP not found - offer to install or retry
+  FileWrite $9 "NPCAP not found - prompting user for installation$\r$\n"
+  MessageBox MB_YESNO "Almost there! Npcap is the last thing you need to install, and we will take care of the rest. We will open that window for you now. Please make sure you select $\"Install Npcap in WinPcap API-compatible Mode$\" is selected. This is probably selected by default.$\r$\n$\r$\nClick YES to open the download page, or NO to exit the installer." IDYES download_npcap IDNO abort_install
+  
+  download_npcap:
+    FileWrite $9 "Opening NPCAP download page...$\r$\n"
+    ExecShell "open" "https://nmap.org/npcap/"
+    
+    npcap_retry_loop:
+      MessageBox MB_YESNO "Install NPCAP with WinPcap compatibility, then click YES when done or NO to exit the installer." IDYES recheck_npcap IDNO abort_install
+      
+    recheck_npcap:
+      FileWrite $9 "Rechecking NPCAP installation...$\r$\n"
+      ; Check registry again
+      ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" "DisplayName"
+      ${If} $0 != ""
+        FileWrite $9 "NPCAP successfully detected via registry: $0$\r$\n"
+        Goto npcap_found
+      ${EndIf}
+      
+      ; Check for DLL files again
+      ${If} ${FileExists} "$WINDIR\System32\npcap.dll"
+        FileWrite $9 "NPCAP DLL successfully detected$\r$\n"
+        Goto npcap_found
+      ${EndIf}
+      
+      ${If} ${FileExists} "$WINDIR\System32\wpcap.dll"
+        FileWrite $9 "WPCAP DLL successfully detected$\r$\n"
+        Goto npcap_found
+      ${EndIf}
+      
+      ; Still not found - ask to try again
+      MessageBox MB_YESNO "NPCAP not found. Try again?" IDYES npcap_retry_loop IDNO abort_install
+      
+  abort_install:
+    FileWrite $9 "Installation aborted - NPCAP is required$\r$\n"
+    FileClose $9
+    Abort
   
   npcap_found:
   FileWrite $9 "NPCAP dependency check completed successfully$\r$\n"
@@ -567,7 +600,7 @@ Section -Post
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
   
   ; Show final installation summary
-  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running in background$\r$\n✓ Will start automatically when you log in$\r$\n✓ Windows Firewall configured for honeypot services$\r$\n✓ No visible command prompt window$\r$\n$\r$\nManual launchers available in:$\r$\n$INSTDIR$\r$\n$\r$\nView logs: $INSTDIR\logs\$\r$\nManage via Start Menu shortcuts"
+  MessageBox MB_OK "LightScope Installation Complete!$\r$\n$\r$\n✓ LightScope is installed and running in background$\r$\n✓ Will start automatically when you log in$\r$\n✓ Windows Firewall configured for honeypot services$\r$\n$\r$\nIf you ever want to uninstall LightScope, please go to $\"add or remove programs$\" and find LightScope on the list. It will give you an option to completely remove it from your system.$\r$\n$\r$\nThank you again for supporting cybersecurity research!"
 SectionEnd
 
 ;--------------------------------
