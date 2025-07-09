@@ -339,13 +339,39 @@ Section "Core Files" SEC01
   File "/oname=$INSTDIR\config\lightscope-public.pem" "lightscope-public.pem"
   FileWrite $9 "Public key copied from installation package$\r$\n"
   
+  ; Copy system tray icon
+  File "/oname=$INSTDIR\ls.png" "ls.png"
+  FileWrite $9 "System tray icon copied from installation package$\r$\n"
+  
   ; Create config file
   FileOpen $0 "$INSTDIR\config\config.ini" w
-  FileWrite $0 "[DEFAULT]$\r$\n"
-  FileWrite $0 "interface = auto$\r$\n"
-  FileWrite $0 "upload_url = https://thelightscope.com/upload$\r$\n"
-  FileWrite $0 "update_interval = 86400$\r$\n"
-  FileWrite $0 "user_mode = true$\r$\n"
+  FileWrite $0 "[Settings]$\r$\n"
+  FileWrite $0 "# Database name for storing LightScope data (auto-generated during installation)$\r$\n"
+  FileWrite $0 "database = $\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Randomization key for IP address anonymization (auto-generated if empty)$\r$\n"
+  FileWrite $0 "randomization_key = $\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Enable automatic SSH/Telnet honeypot port forwarding (yes/no)$\r$\n"
+  FileWrite $0 "self_telnet_and_ssh_honeypot_ports_to_forward = no$\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Enable automatic updates (yes/no)$\r$\n"
+  FileWrite $0 "autoupdate = yes$\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Update check interval in hours (minimum 1 hour)$\r$\n"
+  FileWrite $0 "update_check_interval = 24$\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Enable debug logging (yes/no)$\r$\n"
+  FileWrite $0 "debug_logging = no$\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Custom interface to monitor (leave empty for auto-detection)$\r$\n"
+  FileWrite $0 "interface = $\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Maximum number of concurrent honeypot ports$\r$\n"
+  FileWrite $0 "max_honeypot_ports = 10$\r$\n"
+  FileWrite $0 "$\r$\n"
+  FileWrite $0 "# Honeypot rotation interval in hours$\r$\n"
+  FileWrite $0 "honeypot_rotation_interval = 4$\r$\n"
   FileClose $0
   
   ; Create Python virtual environment for LightScope
@@ -419,7 +445,7 @@ Section "Core Files" SEC01
   ; Install core dependencies
   DetailPrint "Installing core Python packages..."
   FileWrite $9 "Installing core dependencies...$\r$\n"
-  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy pywin32'
+  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy pywin32 pystray Pillow'
   Pop $0
   FileWrite $9 "Core dependencies install exit code: $0$\r$\n"
   
@@ -525,14 +551,13 @@ Section "Core Files" SEC01
   DetailPrint "Configuring automatic startup..."
   FileWrite $9 "$\r$\n=== Configuring Automatic Startup ===$\r$\n"
   
-  ; Add registry entry for startup (background mode)
+  ; Add registry entry for startup (background mode) - PRIMARY startup method
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LightScope" "$\"$INSTDIR\start-lightscope-background.bat$\""
   FileWrite $9 "Added startup registry entry (background mode)$\r$\n"
   
-  ; Create startup folder shortcut as backup (background mode)
-  CreateDirectory "$SMSTARTUP"
-  CreateShortCut "$SMSTARTUP\LightScope.lnk" "$INSTDIR\start-lightscope-background.bat" "" "" 0 SW_SHOWMINIMIZED
-  FileWrite $9 "Created startup folder shortcut (background mode)$\r$\n"
+  ; Remove any existing startup folder shortcut to prevent duplicate launches
+  Delete "$SMSTARTUP\LightScope.lnk"
+  FileWrite $9 "Removed any existing startup folder shortcut to prevent duplicates$\r$\n"
   
   ; Start LightScope immediately in background
   DetailPrint "Starting LightScope in background..."

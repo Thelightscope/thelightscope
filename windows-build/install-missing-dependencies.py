@@ -89,12 +89,19 @@ def register_pywin32():
         raise RuntimeError("pywin32_postinstall script execution failed")
 
 def test_imports():
-    """Test that pywin32 modules can be imported successfully"""
+    """Test that all required modules can be imported successfully"""
     print("\n" + "=" * 60)
-    print("Testing pywin32 imports...")
+    print("Testing module imports...")
     print("=" * 60)
     
-    test_modules = ['pywintypes', 'pythoncom', 'win32api', 'win32com.client']
+    test_modules = [
+        'pywintypes', 
+        'pythoncom', 
+        'win32api', 
+        'win32com.client',
+        'pystray',
+        'PIL'
+    ]
     failed_imports = []
     
     for module in test_modules:
@@ -125,7 +132,9 @@ def main():
         "scapy",
         "pywin32",  # Critical for Windows COM functionality
         "wmi",      # Windows Management Instrumentation
-        "pcap-ct==1.3.0b3"  # Specific version for packet capture
+        "pcap-ct==1.3.0b3",  # Specific version for packet capture
+        "pystray",  # System tray icon support
+        "Pillow"    # Required for pystray image creation
     ]
     
     try:

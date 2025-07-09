@@ -42,11 +42,23 @@ import tempfile
 import subprocess
 import urllib.request
 import urllib.error
+import webbrowser
+import threading
+import configparser
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
 import psutil
+
+# System tray icon support
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    TRAY_AVAILABLE = True
+except ImportError:
+    TRAY_AVAILABLE = False
+    print("Warning: pystray not available. System tray icon will be disabled.")
 
 # Test pywintypes import at startup
 print("Testing pywintypes import...")
@@ -111,6 +123,275 @@ def is_user_mode():
     return True  # Default to user mode for user-level operation
 
 USER_MODE = is_user_mode()
+
+class LightScopeTray:
+    """System tray icon for LightScope with menu options"""
+    
+    def __init__(self):
+        self.icon = None
+        self.running = False
+        self.db_name = self.get_db_name()
+        self.last_db_check = 0
+        
+    def get_db_name(self):
+        """Get database name from config.ini"""
+        try:
+            config_file = CONFIG_DIR / "config.ini"
+            if config_file.exists():
+                config = configparser.ConfigParser()
+                config.read(config_file)
+                
+                # Try different possible sections and keys
+                possible_locations = [
+                    ('Settings', 'database'),
+                    ('DEFAULT', 'database'),
+                    ('Settings', 'db_name'),
+                    ('DEFAULT', 'db_name')
+                ]
+                
+                for section, key in possible_locations:
+                    if section in config and key in config[section]:
+                        db_name = config[section][key].strip()
+                        if db_name:
+                            logger.info(f"Found database name: {db_name}")
+                            return db_name
+                
+                # If database name is empty, generate one and save it
+                logger.info("Database name is empty, generating new one...")
+                return self.generate_and_save_db_name()
+                
+        except Exception as e:
+            logger.error(f"Error reading database name from config: {e}")
+        
+        # Try to generate a new database name if config doesn't exist
+        logger.info("Config file not found, generating new database name...")
+        return self.generate_and_save_db_name()
+    
+    def generate_and_save_db_name(self):
+        """Generate a new database name and save it to config.ini"""
+        try:
+            import datetime
+            import random
+            import string
+            
+            # Generate database name like the core does
+            today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
+            max_len = 63                                   # leave room under 64
+            rand_len = max_len - len(today) - 1            # "-1" for the underscore
+            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+            db_name = f"{today}_{rand_part}"
+            
+            # Save it to config.ini
+            config_file = CONFIG_DIR / "config.ini"
+            
+            # Ensure config directory exists
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            
+            config = configparser.ConfigParser()
+            if config_file.exists():
+                config.read(config_file)
+            
+            # Ensure Settings section exists
+            if not config.has_section('Settings'):
+                config.add_section('Settings')
+            
+            # Set the database name
+            config['Settings']['database'] = db_name
+            
+            # Write back to file
+            with open(config_file, 'w') as f:
+                config.write(f)
+            
+            logger.info(f"Generated and saved database name: {db_name}")
+            return db_name
+            
+        except Exception as e:
+            logger.error(f"Error generating database name: {e}")
+            return "unknown"
+    
+    def create_icon_image(self):
+        """Create icon image from ls.png file or fallback to generated icon"""
+        try:
+            # Try to load ls.png from the same directory as the script
+            icon_path = SCRIPT_DIR / "ls.png"
+            if icon_path.exists():
+                logger.info(f"Loading custom icon from: {icon_path}")
+                image = Image.open(icon_path)
+                # Resize to 64x64 for system tray
+                image = image.resize((64, 64), Image.Resampling.LANCZOS)
+                return image
+            else:
+                logger.warning(f"Custom icon not found at: {icon_path}")
+                
+            # Try alternative locations
+            alternative_paths = [
+                SCRIPT_DIR.parent / "ls.png",
+                CONFIG_DIR / "ls.png",
+                LIGHTSCOPE_HOME / "ls.png"
+            ]
+            
+            for alt_path in alternative_paths:
+                if alt_path.exists():
+                    logger.info(f"Loading custom icon from alternative location: {alt_path}")
+                    image = Image.open(alt_path)
+                    image = image.resize((64, 64), Image.Resampling.LANCZOS)
+                    return image
+                    
+        except Exception as e:
+            logger.error(f"Error loading custom icon: {e}")
+        
+        # Fallback to generated icon
+        logger.info("Using fallback generated icon")
+        return self.create_fallback_icon()
+    
+    def create_fallback_icon(self):
+        """Create a simple fallback icon if ls.png is not available"""
+        # Create a 64x64 image with a simple LightScope logo
+        width = height = 64
+        image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        
+        # Draw a simple lighthouse-like icon
+        # Base circle (light)
+        draw.ellipse([16, 16, 48, 48], fill=(255, 255, 0, 255), outline=(255, 200, 0, 255), width=2)
+        
+        # Tower
+        draw.rectangle([28, 32, 36, 56], fill=(100, 100, 100, 255))
+        
+        # Light rays
+        draw.line([32, 20, 10, 10], fill=(255, 255, 255, 200), width=2)
+        draw.line([32, 20, 54, 10], fill=(255, 255, 255, 200), width=2)
+        draw.line([32, 20, 5, 32], fill=(255, 255, 255, 200), width=2)
+        draw.line([32, 20, 59, 32], fill=(255, 255, 255, 200), width=2)
+        
+        return image
+    
+    def update_db_name_if_needed(self):
+        """Update database name if it has changed or if it's been a while since last check"""
+        import time
+        current_time = time.time()
+        
+        # Check every 60 seconds for database name updates
+        if current_time - self.last_db_check > 60:
+            new_db_name = self.get_db_name()
+            if new_db_name != self.db_name:
+                logger.info(f"Database name updated from '{self.db_name}' to '{new_db_name}'")
+                self.db_name = new_db_name
+                # Update the tray icon menu
+                if self.icon:
+                    self.icon.menu = self.create_menu()
+            self.last_db_check = current_time
+    
+    def view_dashboard(self, icon=None, item=None):
+        """Open the LightScope dashboard in browser"""
+        try:
+            # Update database name in case it has changed
+            self.update_db_name_if_needed()
+            
+            url = f"https://thelightscope.com/tables/{self.db_name}"
+            webbrowser.open(url)
+            logger.info(f"Opened dashboard: {url}")
+        except Exception as e:
+            logger.error(f"Error opening dashboard: {e}")
+    
+    def quit_lightscope(self, icon=None, item=None):
+        """Quit LightScope application"""
+        logger.info("Quit requested from system tray")
+        self.running = False
+        
+        try:
+            # Stop the tray icon first
+            if self.icon:
+                self.icon.stop()
+            
+            # Clean up any child processes
+            import psutil
+            current_process = psutil.Process()
+            children = current_process.children(recursive=True)
+            
+            if children:
+                logger.info(f"Terminating {len(children)} child processes...")
+                for child in children:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                # Wait for children to terminate
+                psutil.wait_procs(children, timeout=5)
+                
+                # Force kill any remaining children
+                for child in children:
+                    try:
+                        if child.is_running():
+                            child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+            
+            logger.info("LightScope shutdown complete")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        
+        # Clean up lock file
+        try:
+            lock_file = LOGS_DIR / "lightscope-runner.lock"
+            if lock_file.exists():
+                lock_file.unlink()
+                logger.info("Cleaned up lock file on quit")
+        except Exception as e:
+            logger.warning(f"Could not clean up lock file on quit: {e}")
+        
+        # Exit the main process
+        os._exit(0)
+    
+    def create_menu(self):
+        """Create the context menu for the tray icon"""
+        return pystray.Menu(
+            pystray.MenuItem("LightScope", None, enabled=False),  # Title (disabled)
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("View Dashboard", self.view_dashboard),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit LightScope", self.quit_lightscope)
+        )
+    
+    def start_tray(self):
+        """Start the system tray icon"""
+        if not TRAY_AVAILABLE:
+            logger.warning("System tray not available - pystray not installed")
+            return
+            
+        try:
+            # Create icon image
+            icon_image = self.create_icon_image()
+            
+            # Create tray icon
+            self.icon = pystray.Icon(
+                "LightScope",
+                icon_image,
+                "LightScope Network Monitor",
+                menu=self.create_menu()
+            )
+            
+            self.running = True
+            logger.info("Starting system tray icon")
+            
+            # Run the tray icon (this blocks)
+            self.icon.run()
+            
+        except Exception as e:
+            logger.error(f"Error creating system tray icon: {e}")
+    
+    def start_tray_thread(self):
+        """Start the tray icon in a separate thread"""
+        if TRAY_AVAILABLE:
+            tray_thread = threading.Thread(target=self.start_tray, daemon=True)
+            tray_thread.start()
+            logger.info("System tray thread started")
+            return tray_thread
+        else:
+            logger.warning("System tray not available")
+            return None
 
 class SecureUpdater:
     """Handles secure downloading and verification of LightScope updates"""
@@ -628,9 +909,98 @@ def check_admin_privileges():
     except:
         return False
 
+def ensure_config_database_name():
+    """Ensure that config.ini has a database name set"""
+    try:
+        config_file = CONFIG_DIR / "config.ini"
+        
+        # Ensure config directory exists
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        config = configparser.ConfigParser()
+        if config_file.exists():
+            config.read(config_file)
+        
+        # Ensure Settings section exists
+        if not config.has_section('Settings'):
+            config.add_section('Settings')
+        
+        # Check if database name exists and is not empty
+        db_name = config.get('Settings', 'database', fallback='').strip()
+        if not db_name:
+            # Generate database name like the core does
+            import datetime
+            import random
+            import string
+            
+            today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
+            max_len = 63                                   # leave room under 64
+            rand_len = max_len - len(today) - 1            # "-1" for the underscore
+            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+            db_name = f"{today}_{rand_part}"
+            
+            # Set the database name
+            config['Settings']['database'] = db_name
+            
+            # Write back to file
+            with open(config_file, 'w') as f:
+                config.write(f)
+            
+            logger.info(f"Generated database name: {db_name}")
+        else:
+            logger.info(f"Using existing database name: {db_name}")
+            
+        return db_name
+        
+    except Exception as e:
+        logger.error(f"Error ensuring database name: {e}")
+        return "unknown"
+
 def main():
     """Main runner function"""
     logger.info("LightScope Windows Runner starting...")
+    
+    # Single instance check to prevent multiple runners
+    try:
+        import fcntl
+        lock_file = LOGS_DIR / "lightscope-runner.lock"
+        lock_fd = open(lock_file, 'w')
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        logger.info("Single instance lock acquired")
+    except ImportError:
+        # fcntl not available on Windows, use alternative method
+        lock_file = LOGS_DIR / "lightscope-runner.lock"
+        try:
+            # Check if lock file exists and contains a running PID
+            if lock_file.exists():
+                with open(lock_file, 'r') as f:
+                    old_pid = f.read().strip()
+                
+                if old_pid:
+                    try:
+                        import psutil
+                        old_process = psutil.Process(int(old_pid))
+                        if old_process.is_running():
+                            logger.error(f"Another LightScope instance is already running (PID: {old_pid})")
+                            logger.error("Please close the existing instance before starting a new one")
+                            sys.exit(1)
+                        else:
+                            logger.info(f"Removing stale lock file for PID {old_pid}")
+                            lock_file.unlink()
+                    except (ValueError, psutil.NoSuchProcess):
+                        logger.info("Removing invalid lock file")
+                        lock_file.unlink()
+            
+            # Create lock file with current PID
+            with open(lock_file, 'w') as f:
+                f.write(str(os.getpid()))
+            logger.info("Single instance lock created")
+            
+        except Exception as e:
+            logger.warning(f"Could not create single instance lock: {e}")
+    except Exception as e:
+        logger.error(f"Another LightScope instance is already running: {e}")
+        sys.exit(1)
     
     # Log detected paths for debugging
     logger.info(f"Script directory: {SCRIPT_DIR}")
@@ -661,11 +1031,19 @@ def main():
     # Ensure directories exist
     ensure_directories()
     
+    # Ensure database name is configured before starting tray icon
+    db_name = ensure_config_database_name()
+    logger.info(f"Database name configured: {db_name}")
+    
     # Check and install Python dependencies
     check_and_install_dependencies()
     
     # Initialize updater
     updater = SecureUpdater()
+    
+    # Initialize system tray icon
+    tray = LightScopeTray()
+    tray_thread = tray.start_tray_thread()
     
     # Check for updates on startup
     try:
@@ -731,6 +1109,15 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error in runner: {e}")
         sys.exit(1)
+    finally:
+        # Clean up lock file on exit
+        try:
+            lock_file = LOGS_DIR / "lightscope-runner.lock"
+            if lock_file.exists():
+                lock_file.unlink()
+                logger.info("Cleaned up lock file")
+        except Exception as e:
+            logger.warning(f"Could not clean up lock file: {e}")
 
 if __name__ == "__main__":
     main() 

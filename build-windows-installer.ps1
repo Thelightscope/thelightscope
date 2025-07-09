@@ -58,7 +58,9 @@ function Test-Dependencies {
         @("requests", "requests"),
         @("dpkt", "dpkt"),
         @("pywin32", "pywintypes"),  # Install pywin32 but test pywintypes
-        @("wmi", "wmi")
+        @("wmi", "wmi"),
+        @("pystray", "pystray"),
+        @("Pillow", "PIL")
     )
     
     foreach ($PackageInfo in $RequiredPackages) {
@@ -122,7 +124,8 @@ function Prepare-BuildFiles {
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'install-missing-dependencies.py'); name = 'install-missing-dependencies.py'},
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'README-INSTALLATION.md'); name = 'README-INSTALLATION.md'},
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-installer.nsi'); name = 'lightscope-installer.nsi'},
-        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-public.pem'); name = 'lightscope-public.pem'}
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-public.pem'); name = 'lightscope-public.pem'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'ls.png'); name = 'ls.png'}
     )
 
     # Copy all required files
