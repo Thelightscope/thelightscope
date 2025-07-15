@@ -8,10 +8,10 @@ BUILD_DIR="$SCRIPT_DIR/build-macos"
 PACKAGE_NAME="LightScope"
 APP_DIR="$BUILD_DIR/$PACKAGE_NAME.app"
 
-# Get version from lightscope_core.py
-VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')
+# Get version from lightscope_core_mac.py
+VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core_mac.py | sed 's/ls_version = "\(.*\)"/\1/')
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not extract version from lightscope_core.py"
+    echo "Error: Could not extract version from lightscope_core_mac.py"
     exit 1
 fi
 
@@ -28,13 +28,13 @@ mkdir -p "$APP_DIR/Contents/Resources/bin"
 mkdir -p "$APP_DIR/Contents/Resources/config"
 mkdir -p "$APP_DIR/Contents/Resources/logs"
 
-# Copy the actual lightscope_core.py
-echo "Copying lightscope/lightscope_core.py (v$VERSION)..."
-cp lightscope/lightscope_core.py "$APP_DIR/Contents/Resources/bin/"
+# Copy the actual lightscope_core.py (macOS version with SSL fixes)
+echo "Copying lightscope/lightscope_core_mac.py (v$VERSION)..."
+cp lightscope/lightscope_core_mac.py "$APP_DIR/Contents/Resources/bin/lightscope_core.py"
 
-# Copy the lightscope-runner.py
-echo "Copying lightscope-runner.py..."
-cp debian_package/opt/lightscope/bin/lightscope-runner.py "$APP_DIR/Contents/Resources/bin/"
+# Copy the lightscope-runner.py (macOS version with SSL fixes)
+echo "Copying lightscope-runner-mac.py..."
+cp lightscope/lightscope-runner-mac.py "$APP_DIR/Contents/Resources/bin/lightscope-runner.py"
 
 # Get runner version for logging
 RUNNER_VERSION=$(grep -o 'runner_version = "[^"]*"' "$APP_DIR/Contents/Resources/bin/lightscope-runner.py" | sed 's/runner_version = "\(.*\)"/\1/')
