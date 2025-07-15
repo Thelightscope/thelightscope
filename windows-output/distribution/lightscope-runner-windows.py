@@ -134,9 +134,13 @@ class LightScopeTray:
         self.last_db_check = 0
         
     def get_db_name(self):
-        """Get database name from config.ini"""
+        """Get database name from config.ini, waiting for LightScope Core to set it first"""
+        import time
+        
         try:
             config_file = CONFIG_DIR / "config.ini"
+            
+            # First, try to read existing database name from config
             if config_file.exists():
                 config = configparser.ConfigParser()
                 config.read(config_file)
@@ -152,24 +156,71 @@ class LightScopeTray:
                 for section, key in possible_locations:
                     if section in config and key in config[section]:
                         db_name = config[section][key].strip()
-                        if db_name:
+                        if db_name and db_name != "uninitialized":
                             logger.info(f"Found database name: {db_name}")
                             return db_name
                 
-                # If database name is empty, generate one and save it
-                logger.info("Database name is empty, generating new one...")
+                # If database name is empty or uninitialized, wait for LightScope Core
+                logger.info("Database name is empty or uninitialized, waiting for LightScope Core...")
+                
+                # Wait up to 30 seconds for LightScope Core to set the database name
+                for attempt in range(30):
+                    time.sleep(1)
+                    
+                    # Re-read config file
+                    if config_file.exists():
+                        config = configparser.ConfigParser()
+                        config.read(config_file)
+                        
+                        for section, key in possible_locations:
+                            if section in config and key in config[section]:
+                                db_name = config[section][key].strip()
+                                if db_name and db_name != "uninitialized":
+                                    logger.info(f"LightScope Core set database name: {db_name}")
+                                    return db_name
+                    
+                    logger.info(f"Waiting for LightScope Core to set database name... ({attempt + 1}/30)")
+                
+                # If still no database name after waiting, generate one as last resort
+                logger.info("LightScope Core didn't set database name, generating as last resort...")
                 return self.generate_and_save_db_name()
                 
         except Exception as e:
             logger.error(f"Error reading database name from config: {e}")
         
-        # Try to generate a new database name if config doesn't exist
-        logger.info("Config file not found, generating new database name...")
+        # If config doesn't exist, wait briefly for LightScope Core to create it
+        logger.info("Config file not found, waiting for LightScope Core to create it...")
+        for attempt in range(10):
+            time.sleep(2)
+            if config_file.exists():
+                logger.info("Config file created by LightScope Core, trying to read...")
+                return self.get_db_name()  # Recursive call to read the newly created file
+            logger.info(f"Waiting for LightScope Core to create config... ({attempt + 1}/10)")
+        
+        # Final fallback - generate database name
+        logger.info("LightScope Core didn't create config, generating database name as final fallback...")
         return self.generate_and_save_db_name()
     
     def generate_and_save_db_name(self):
-        """Generate a new database name and save it to config.ini"""
+        """Generate a new database name and save it to config.ini (only if none exists)"""
         try:
+            config_file = CONFIG_DIR / "config.ini"
+            
+            # Ensure config directory exists
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            
+            config = configparser.ConfigParser()
+            if config_file.exists():
+                config.read(config_file)
+                
+                # Check if database name already exists and is valid
+                if config.has_section('Settings') and 'database' in config['Settings']:
+                    existing_db_name = config['Settings']['database'].strip()
+                    if existing_db_name and existing_db_name != "uninitialized":
+                        logger.info(f"Database name already exists: {existing_db_name}")
+                        return existing_db_name
+            
+            # Generate new database name only if none exists
             import datetime
             import random
             import string
@@ -180,16 +231,6 @@ class LightScopeTray:
             rand_len = max_len - len(today) - 1            # "-1" for the underscore
             rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
             db_name = f"{today}_{rand_part}"
-            
-            # Save it to config.ini
-            config_file = CONFIG_DIR / "config.ini"
-            
-            # Ensure config directory exists
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            
-            config = configparser.ConfigParser()
-            if config_file.exists():
-                config.read(config_file)
             
             # Ensure Settings section exists
             if not config.has_section('Settings'):
@@ -202,7 +243,7 @@ class LightScopeTray:
             with open(config_file, 'w') as f:
                 config.write(f)
             
-            logger.info(f"Generated and saved database name: {db_name}")
+            logger.info(f"Generated and saved new database name: {db_name}")
             return db_name
             
         except Exception as e:
@@ -910,12 +951,24 @@ def check_admin_privileges():
         return False
 
 def ensure_config_database_name():
-    """Ensure that config.ini has a database name set"""
+    """Ensure that config.ini has a database name set, waiting for LightScope Core first"""
+    import time
+    
     try:
         config_file = CONFIG_DIR / "config.ini"
         
         # Ensure config directory exists
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # Wait for LightScope Core to create config file if it doesn't exist
+        if not config_file.exists():
+            logger.info("Config file doesn't exist, waiting for LightScope Core to create it...")
+            for attempt in range(10):
+                time.sleep(2)
+                if config_file.exists():
+                    logger.info("Config file created by LightScope Core")
+                    break
+                logger.info(f"Waiting for LightScope Core to create config... ({attempt + 1}/10)")
         
         config = configparser.ConfigParser()
         if config_file.exists():
@@ -925,31 +978,54 @@ def ensure_config_database_name():
         if not config.has_section('Settings'):
             config.add_section('Settings')
         
-        # Check if database name exists and is not empty
+        # Check if database name exists and is valid
         db_name = config.get('Settings', 'database', fallback='').strip()
-        if not db_name:
-            # Generate database name like the core does
-            import datetime
-            import random
-            import string
-            
-            today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-            max_len = 63                                   # leave room under 64
-            rand_len = max_len - len(today) - 1            # "-1" for the underscore
-            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-            db_name = f"{today}_{rand_part}"
-            
-            # Set the database name
-            config['Settings']['database'] = db_name
-            
-            # Write back to file
-            with open(config_file, 'w') as f:
-                config.write(f)
-            
-            logger.info(f"Generated database name: {db_name}")
-        else:
+        if db_name and db_name != "uninitialized":
             logger.info(f"Using existing database name: {db_name}")
+            return db_name
+        
+        # If database name is empty or uninitialized, wait for LightScope Core
+        logger.info("Database name is empty or uninitialized, waiting for LightScope Core...")
+        
+        # Wait up to 30 seconds for LightScope Core to set the database name
+        for attempt in range(30):
+            time.sleep(1)
             
+            # Re-read config file
+            if config_file.exists():
+                config = configparser.ConfigParser()
+                config.read(config_file)
+                
+                if config.has_section('Settings') and 'database' in config['Settings']:
+                    db_name = config['Settings']['database'].strip()
+                    if db_name and db_name != "uninitialized":
+                        logger.info(f"LightScope Core set database name: {db_name}")
+                        return db_name
+            
+            logger.info(f"Waiting for LightScope Core to set database name... ({attempt + 1}/30)")
+        
+        # If still no database name after waiting, generate one as last resort
+        logger.info("LightScope Core didn't set database name, generating as last resort...")
+        
+        # Generate database name like the core does
+        import datetime
+        import random
+        import string
+        
+        today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
+        max_len = 63                                   # leave room under 64
+        rand_len = max_len - len(today) - 1            # "-1" for the underscore
+        rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+        db_name = f"{today}_{rand_part}"
+        
+        # Set the database name
+        config['Settings']['database'] = db_name
+        
+        # Write back to file
+        with open(config_file, 'w') as f:
+            config.write(f)
+        
+        logger.info(f"Generated database name: {db_name}")
         return db_name
         
     except Exception as e:

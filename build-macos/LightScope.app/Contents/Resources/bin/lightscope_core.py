@@ -1360,22 +1360,9 @@ def send_honeypot_data(consumer_upload_conn):
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
     session = requests.Session()
-    # Configure SSL context for macOS compatibility
-    import ssl
-    from urllib3.util.ssl_ import create_urllib3_context
-    
-    # Create SSL context that works with LibreSSL on macOS
-    ssl_context = create_urllib3_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    
     adapter = HTTPAdapter(pool_connections=2, pool_maxsize=2)
     session.mount("https://", adapter)
     session.mount("http://",  adapter)
-    
-    # Disable SSL warnings for self-signed certificates
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
@@ -1455,22 +1442,9 @@ def send_data(consumer_upload_conn):
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
     session = requests.Session()
-    # Configure SSL context for macOS compatibility
-    import ssl
-    from urllib3.util.ssl_ import create_urllib3_context
-    
-    # Create SSL context that works with LibreSSL on macOS
-    ssl_context = create_urllib3_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    
     adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4)
     session.mount("https://", adapter)
     session.mount("http://",  adapter)
-    
-    # Disable SSL warnings for self-signed certificates
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
@@ -1938,20 +1912,7 @@ def check_ip_is_private(ip_str):
 
 def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
     try:
-        # Configure SSL context for macOS compatibility
-        import ssl
-        from urllib3.util.ssl_ import create_urllib3_context
-        import urllib3
-        
-        # Create SSL context that works with LibreSSL on macOS
-        ssl_context = create_urllib3_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        # Disable SSL warnings
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        resp = requests.get(url, timeout=10, verify=False)  # Increased timeout from 5 to 10 seconds
+        resp = requests.get(url, timeout=10)  # Increased timeout from 5 to 10 seconds
         resp.raise_for_status()
         data = resp.json()
 

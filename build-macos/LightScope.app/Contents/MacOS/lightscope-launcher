@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# LightScope macOS Launcher
+# This script sets up the environment and runs LightScope
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RESOURCES_DIR="$APP_DIR/Resources"
+VENV_PATH="$RESOURCES_DIR/venv"
+LOGS_DIR="$RESOURCES_DIR/logs"
+CONFIG_DIR="$RESOURCES_DIR/config"
+
+# Create logs directory if it doesn't exist
+mkdir -p "$LOGS_DIR"
+
+# Log file for the launcher
+LOG_FILE="$LOGS_DIR/lightscope-launcher.log"
+
+# Function to log messages
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+log "Starting LightScope launcher..."
+
+# Check BPF permissions
+check_bpf_permissions() {
+    log "Checking BPF permissions..."
+    
+    # Check if we can access BPF devices
+    BPF_ACCESSIBLE=false
+    for bpf_dev in /dev/bpf*; do
+        if [ -e "$bpf_dev" ] && [ -r "$bpf_dev" ]; then
+            BPF_ACCESSIBLE=true
+            break
+        fi
+    done
+    
+    if [ "$BPF_ACCESSIBLE" = false ]; then
+        log "BPF devices not accessible, packet capture may fail"
+        log "Consider running: sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh"
+        return 1
+    else
+        log "BPF permissions OK"
+        return 0
+    fi
+}
+
+# Check if virtual environment exists, create if not
+if [ ! -d "$VENV_PATH" ]; then
+    log "Creating Python virtual environment..."
+    python3 -m venv "$VENV_PATH"
+    
+    # Activate and install dependencies
+    source "$VENV_PATH/bin/activate"
+    
+    log "Installing dependencies..."
+    pip install --upgrade pip
+    pip install dpkt psutil requests cryptography
+    
+    # Install local python-libpcap if available
+    if [ -d "$RESOURCES_DIR/python-libpcap" ]; then
+        log "Installing local python-libpcap..."
+        cd "$RESOURCES_DIR/python-libpcap"
+        pip install .
+        cd "$RESOURCES_DIR"
+    fi
+    
+    deactivate
+    log "Virtual environment setup complete"
+fi
+
+# Generate config if it doesn't exist
+if [ ! -f "$CONFIG_DIR/config.ini" ]; then
+    log "Creating configuration file..."
+    
+    # Generate unique database name
+    TODAY=$(date +%Y%m%d)
+    RAND_PART=$(cat /dev/urandom | tr -dc 'a-z' | head -c 47)
+    DB_NAME="${TODAY}_${RAND_PART}"
+    
+    # Create config from example
+    sed "s/database = /database = $DB_NAME/" "$CONFIG_DIR/config.ini.example" > "$CONFIG_DIR/config.ini"
+    
+    log "Configuration created with database: $DB_NAME"
+fi
+
+# Check BPF permissions
+if ! check_bpf_permissions; then
+    log "WARNING: BPF permissions may not be properly configured"
+fi
+
+# Set environment variables
+export PYTHONPATH="$RESOURCES_DIR/bin"
+export LIGHTSCOPE_CONFIG="$CONFIG_DIR/config.ini"
+
+# Run LightScope
+log "Starting LightScope runner..."
+source "$VENV_PATH/bin/activate"
+exec python3 "$RESOURCES_DIR/bin/lightscope-runner.py"
