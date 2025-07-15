@@ -16,22 +16,10 @@ import urllib.request
 import urllib.error
 import threading
 import signal
-import configparser
-import webbrowser
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
-
-# macOS notification support
-try:
-    import plyer
-    NOTIFICATION_AVAILABLE = True
-    NOTIFICATION_LIBRARY = "plyer"
-except ImportError:
-    NOTIFICATION_AVAILABLE = False
-    NOTIFICATION_LIBRARY = None
-    # Note: logger not yet defined, will log this later
 
 
 # Import systemd watchdog support
@@ -77,9 +65,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lightscope-runner")
 
-# Log systemd availability info if needed
+# Log systemd availability warning if needed
 if not SYSTEMD_AVAILABLE:
-    logger.info("Running on macOS - using LaunchAgent for process monitoring")
+    logger.warning("systemd module not available, watchdog notifications disabled")
 
 # Global variables for thread coordination
 shutdown_event = threading.Event()
@@ -299,339 +287,23 @@ class SecureUpdater:
             logger.error(f"Error downloading update: {e}")
             return False
 
-class LightScopeNotifications:
-    """macOS notifications for LightScope with action buttons"""
-    
-    def __init__(self):
-        self.running = False
-        self.db_name = self.get_db_name()
-        self.last_db_check = 0
-        self.last_status_notification = 0
-        
-    def get_db_name(self):
-        """Get database name from config.ini, waiting for LightScope Core to set it first"""
-        try:
-            config_file = CONFIG_DIR / "config.ini"
-            
-            # First, try to read existing database name from config
-            if config_file.exists():
-                config = configparser.ConfigParser()
-                config.read(config_file)
-                
-                # Try different possible sections and keys
-                possible_locations = [
-                    ('Settings', 'database'),
-                    ('DEFAULT', 'database'),
-                    ('Settings', 'db_name'),
-                    ('DEFAULT', 'db_name')
-                ]
-                
-                for section, key in possible_locations:
-                    if section in config and key in config[section]:
-                        db_name = config[section][key].strip()
-                        if db_name and db_name != "uninitialized":
-                            logger.info(f"Found database name: {db_name}")
-                            return db_name
-                
-                # If database name is empty or uninitialized, wait for LightScope Core
-                logger.info("Database name is empty or uninitialized, waiting for LightScope Core...")
-                
-                # Wait for LightScope Core to set the database name
-                for _ in range(60):  # Wait up to 60 seconds
-                    if shutdown_event.is_set():
-                        return "unknown"
-                    time.sleep(1)
-                    
-                    # Re-read config
-                    config = configparser.ConfigParser()
-                    config.read(config_file)
-                    
-                    for section, key in possible_locations:
-                        if section in config and key in config[section]:
-                            db_name = config[section][key].strip()
-                            if db_name and db_name != "uninitialized":
-                                logger.info(f"Found database name after waiting: {db_name}")
-                                return db_name
-                
-                logger.warning("Database name not found in config after waiting, generating new one...")
-            
-            # Generate new database name if not found
-            import random
-            today = time.strftime("%Y%m%d")
-            rand_part = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=47))
-            db_name = f"{today}_{rand_part}"
-            
-            # Try to save it to config
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            if config_file.exists():
-                config = configparser.ConfigParser()
-                config.read(config_file)
-            else:
-                config = configparser.ConfigParser()
-                config['DEFAULT'] = {}
-            
-            # Set database name
-            if 'DEFAULT' not in config:
-                config['DEFAULT'] = {}
-            config['DEFAULT']['database'] = db_name
-            
-            # Write back to file
-            with open(config_file, 'w') as f:
-                config.write(f)
-            
-            logger.info(f"Generated and saved new database name: {db_name}")
-            return db_name
-            
-        except Exception as e:
-            logger.error(f"Error generating database name: {e}")
-            return "unknown"
-    
-    def send_startup_notification(self):
-        """Send notification when LightScope starts"""
-        if not NOTIFICATION_AVAILABLE:
-            logger.warning("Notifications not available - plyer not installed")
-            return
-            
-        try:
-            # Update database name in case it has changed
-            self.update_db_name_if_needed()
-            
-            # Send startup notification
-            self.send_notification(
-                title="LightScope Started",
-                message=f"Network monitoring active\nDatabase: {self.db_name}",
-                timeout=10,
-                actions=[
-                    {"title": "View Dashboard", "action": "view_dashboard"},
-                    {"title": "Dismiss", "action": "dismiss"}
-                ]
-            )
-            
-            logger.info("Startup notification sent")
-            
-        except Exception as e:
-            logger.error(f"Error sending startup notification: {e}")
-
-    def send_status_notification(self, force=False):
-        """Send periodic status notification"""
-        if not NOTIFICATION_AVAILABLE:
-            return
-            
-        try:
-            current_time = time.time()
-            
-            # Send status notification every 4 hours, or if forced
-            if force or (current_time - self.last_status_notification) > (4 * 60 * 60):
-                # Update database name in case it has changed
-                self.update_db_name_if_needed()
-                
-                self.send_notification(
-                    title="LightScope Status",
-                    message=f"Network monitoring active\nDatabase: {self.db_name}",
-                    timeout=8,
-                    actions=[
-                        {"title": "View Dashboard", "action": "view_dashboard"},
-                        {"title": "Stop LightScope", "action": "quit_lightscope"}
-                    ]
-                )
-                
-                self.last_status_notification = current_time
-                logger.info("Status notification sent")
-                
-        except Exception as e:
-            logger.error(f"Error sending status notification: {e}")
-
-    def send_notification(self, title, message, timeout=10, actions=None):
-        """Send a macOS notification with optional actions"""
-        try:
-            if NOTIFICATION_LIBRARY == "plyer":
-                # Use plyer for basic notifications
-                plyer.notification.notify(
-                    title=title,
-                    message=message,
-                    timeout=timeout,
-                    app_name="LightScope"
-                )
-                logger.info(f"Plyer notification sent: {title}")
-            else:
-                # Fallback to osascript for notifications with actions
-                self.send_osascript_notification(title, message, timeout, actions)
-                
-        except Exception as e:
-            logger.error(f"Error sending notification: {e}")
-            # Fallback to osascript if plyer fails
-            try:
-                self.send_osascript_notification(title, message, timeout, actions)
-            except Exception as e2:
-                logger.error(f"Fallback notification also failed: {e2}")
-    
-    def send_test_notification(self):
-        """Send a test notification to verify the system works"""
-        try:
-            self.send_notification(
-                title="LightScope Test",
-                message="This is a test notification to verify the system is working",
-                timeout=5
-            )
-            logger.info("Test notification sent successfully")
-        except Exception as e:
-            logger.error(f"Test notification failed: {e}")
-
-    def send_osascript_notification(self, title, message, timeout=10, actions=None):
-        """Send notification using osascript with action buttons"""
-        try:
-            import subprocess
-            
-            # Clean message for AppleScript (remove newlines and escape quotes)
-            clean_message = message.replace('\\n', ' - ').replace('\n', ' - ').replace('"', '\\"')
-            clean_title = title.replace('"', '\\"')
-            
-            if actions and len(actions) > 0:
-                # For interactive notifications, we'll use a simpler approach
-                # Just send the notification without buttons for now
-                script = f'display notification "{clean_message}" with title "{clean_title}"'
-                
-                result = subprocess.run(
-                    ["osascript", "-e", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode != 0:
-                    logger.warning(f"osascript notification failed: {result.stderr}")
-                else:
-                    logger.info(f"Notification sent: {clean_title}")
-            else:
-                # Simple notification without buttons
-                script = f'display notification "{clean_message}" with title "{clean_title}"'
-                
-                result = subprocess.run(
-                    ["osascript", "-e", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode != 0:
-                    logger.warning(f"osascript notification failed: {result.stderr}")
-                else:
-                    logger.info(f"Notification sent: {clean_title}")
-                
-        except Exception as e:
-            logger.error(f"Error with osascript notification: {e}")
-
-    def handle_notification_action(self, button_result, actions):
-        """Handle notification button clicks"""
-        try:
-            # Map button result to action
-            if "View Dashboard" in button_result or "view_dashboard" in button_result:
-                self.view_dashboard()
-            elif "Stop LightScope" in button_result or "quit_lightscope" in button_result:
-                self.quit_lightscope()
-            elif "Dismiss" in button_result:
-                pass  # Just dismiss, no action needed
-                
-        except Exception as e:
-            logger.error(f"Error handling notification action: {e}")
-
-    def start_notifications(self):
-        """Initialize the notification system"""
-        if NOTIFICATION_AVAILABLE:
-            logger.info("Notification system initialized")
-            self.send_startup_notification()
-            return True
-        else:
-            logger.warning("Notifications not available - plyer not installed")
-            return False
-    
-    def update_db_name_if_needed(self):
-        """Update database name if it has changed or if it's been a while since last check"""
-        current_time = time.time()
-        
-        # Check every 60 seconds for database name updates
-        if current_time - self.last_db_check > 60:
-            new_db_name = self.get_db_name()
-            if new_db_name != self.db_name:
-                logger.info(f"Database name updated from '{self.db_name}' to '{new_db_name}'")
-                self.db_name = new_db_name
-            self.last_db_check = current_time
-    
-    def view_dashboard(self, icon=None, item=None):
-        """Open the LightScope dashboard in the default web browser"""
-        try:
-            # Update database name in case it has changed
-            self.update_db_name_if_needed()
-            
-            # Construct dashboard URL
-            dashboard_url = f"https://thelightscope.com/tables/{self.db_name}"
-            
-            logger.info(f"Opening dashboard: {dashboard_url}")
-            webbrowser.open(dashboard_url)
-            
-        except Exception as e:
-            logger.error(f"Error opening dashboard: {e}")
-    
-    def quit_lightscope(self, icon=None, item=None):
-        """Quit LightScope application"""
-        try:
-            logger.info("Quit requested from notification")
-            
-            # Set shutdown event to signal all threads to stop
-            shutdown_event.set()
-            
-            # Exit the main process
-            os._exit(0)
-            
-        except Exception as e:
-            logger.error(f"Error during quit: {e}")
-            # Force exit if there's an error
-            os._exit(1)
-    
-    def schedule_status_notification(self):
-        """Schedule periodic status notifications"""
-        def status_notification_thread():
-            """Background thread to send periodic status notifications"""
-            while not shutdown_event.is_set():
-                try:
-                    # Wait 4 hours before sending status notification
-                    shutdown_event.wait(4 * 60 * 60)
-                    
-                    if not shutdown_event.is_set():
-                        self.send_status_notification()
-                        
-                except Exception as e:
-                    logger.error(f"Error in status notification thread: {e}")
-                    # Sleep before retrying
-                    shutdown_event.wait(60)
-        
-        # Start the background thread
-        import threading
-        thread = threading.Thread(target=status_notification_thread, daemon=True)
-        thread.start()
-        logger.info("Status notification thread started")
-        return thread
-
 def notify_systemd_watchdog():
-    """Send watchdog notification to systemd (Linux) or no-op on macOS"""
+    """Send watchdog notification to systemd"""
     if SYSTEMD_AVAILABLE:
         try:
             systemd.daemon.notify('WATCHDOG=1')
             logger.debug("Sent watchdog notification to systemd")
         except Exception as e:
             logger.warning(f"Failed to send watchdog notification: {e}")
-    # On macOS, this is a no-op since LaunchAgent handles process monitoring
 
 def notify_systemd_ready():
-    """Notify systemd that the service is ready (Linux) or no-op on macOS"""
+    """Notify systemd that the service is ready"""
     if SYSTEMD_AVAILABLE:
         try:
             systemd.daemon.notify('READY=1')
             logger.info("Notified systemd that service is ready")
         except Exception as e:
             logger.warning(f"Failed to notify systemd ready: {e}")
-    # On macOS, this is a no-op since LaunchAgent handles service readiness
 
 def ensure_directories():
     """Ensure all required directories exist"""
@@ -715,8 +387,8 @@ def load_lightscope_core():
             import lightscope_core
         
         # Set global references for the core
-        # Always set watchdog function (will be no-op on macOS)
-        lightscope_core.systemd_watchdog_notify = notify_systemd_watchdog
+        if SYSTEMD_AVAILABLE:
+            lightscope_core.systemd_watchdog_notify = notify_systemd_watchdog
         
         # Set shutdown event reference so core can check for shutdown
         lightscope_core.runner_shutdown_event = shutdown_event
@@ -786,17 +458,6 @@ def main():
     
     # Initialize updater
     updater = SecureUpdater()
-    
-    # Initialize macOS notifications
-    notifications = LightScopeNotifications()
-    notifications.start_notifications()
-    
-    # Schedule periodic status notifications
-    notifications.schedule_status_notification()
-    
-    # Log notification availability warning if needed
-    if not NOTIFICATION_AVAILABLE:
-        logger.warning("Notifications not available - plyer not installed")
     
     # Notify systemd that we're ready to start
     notify_systemd_ready()

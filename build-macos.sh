@@ -147,7 +147,7 @@ if [ ! -d "$VENV_PATH" ]; then
     
     log "Installing dependencies..."
     pip install --upgrade pip
-    pip install dpkt psutil requests cryptography
+    pip install dpkt psutil requests cryptography plyer
     
     # Install local python-libpcap if available
     if [ -d "$RESOURCES_DIR/python-libpcap" ]; then
