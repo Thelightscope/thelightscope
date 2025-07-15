@@ -678,4 +678,34 @@ echo "🔧 Network Monitoring:"
 echo "   - Uses Berkeley Packet Filter (BPF) for packet capture"
 echo "   - Requires one-time permissions setup (included)"
 echo "   - Runs as regular user (not root)"
-echo "   - Same approach as Wireshark and other professional tools" 
+echo "   - Same approach as Wireshark and other professional tools"
+
+# Create a copy with the standard name for upload
+echo ""
+echo "📡 Preparing for upload..."
+UPLOAD_FILE="lightscope_latest_macos.zip"
+cp "$OUTPUT_FILE" "$UPLOAD_FILE"
+
+# Upload to server
+echo "🚀 Uploading to server..."
+if scp "$UPLOAD_FILE" kapitans@lightscope.isi.edu:/tmp/; then
+    echo "✅ Upload successful!"
+    
+    # Move file to final location on server
+    echo "📂 Moving file to final location..."
+    echo "💡 Note: You may be prompted for your sudo password on the server"
+    if ssh -t kapitans@lightscope.isi.edu "sudo mv /tmp/$UPLOAD_FILE /var/www/lightscope/latest/"; then
+        echo "✅ File moved to /var/www/lightscope/latest/$UPLOAD_FILE"
+        echo "🌐 Available at: https://thelightscope.com/latest/$UPLOAD_FILE"
+    else
+        echo "❌ Failed to move file to final location"
+        echo "💡 You may need to manually run: ssh kapitans@lightscope.isi.edu 'sudo mv /tmp/$UPLOAD_FILE /var/www/lightscope/latest/'"
+        exit 1
+    fi
+else
+    echo "❌ Upload failed"
+    exit 1
+fi
+
+# Clean up local upload file
+rm -f "$UPLOAD_FILE" 
