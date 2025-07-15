@@ -8,10 +8,10 @@ BUILD_DIR="$SCRIPT_DIR/build-macos"
 PACKAGE_NAME="LightScope"
 APP_DIR="$BUILD_DIR/$PACKAGE_NAME.app"
 
-# Get version from lightscope_core_mac.py
-VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core_mac.py | sed 's/ls_version = "\(.*\)"/\1/')
+# Get version from lightscope_core.py
+VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not extract version from lightscope_core_mac.py"
+    echo "Error: Could not extract version from lightscope_core.py"
     exit 1
 fi
 
@@ -28,9 +28,9 @@ mkdir -p "$APP_DIR/Contents/Resources/bin"
 mkdir -p "$APP_DIR/Contents/Resources/config"
 mkdir -p "$APP_DIR/Contents/Resources/logs"
 
-# Copy the actual lightscope_core.py (macOS version with SSL fixes)
-echo "Copying lightscope/lightscope_core_mac.py (v$VERSION)..."
-cp lightscope/lightscope_core_mac.py "$APP_DIR/Contents/Resources/bin/lightscope_core.py"
+# Copy the actual lightscope_core.py (works on all platforms)
+echo "Copying lightscope/lightscope_core.py (v$VERSION)..."
+cp lightscope/lightscope_core.py "$APP_DIR/Contents/Resources/bin/lightscope_core.py"
 
 # Copy the lightscope-runner.py (macOS version with SSL fixes)
 echo "Copying lightscope-runner-mac.py..."
@@ -137,10 +137,129 @@ check_bpf_permissions() {
     fi
 }
 
-# Check if virtual environment exists, create if not
-if [ ! -d "$VENV_PATH" ]; then
-    log "Creating Python virtual environment..."
-    python3 -m venv "$VENV_PATH"
+# Find the best Python version with good SSL support
+find_best_python() {
+    local best_python=""
+    local best_version=""
+    
+    # Check Python Framework versions (installed via python.org installer)
+    if [ -d "/Library/Frameworks/Python.framework/Versions" ]; then
+        for version_dir in /Library/Frameworks/Python.framework/Versions/*/; do
+            if [ -d "$version_dir" ]; then
+                local version=$(basename "$version_dir")
+                local python_path="$version_dir/bin/python3"
+                
+                # Skip if not executable
+                [ ! -x "$python_path" ] && continue
+                
+                # Check if this version has good SSL support
+                if check_python_ssl_support "$python_path"; then
+                    # Compare versions (simple string comparison works for major.minor)
+                    if [ -z "$best_version" ] || [ "$version" \> "$best_version" ]; then
+                        best_python="$python_path"
+                        best_version="$version"
+                    fi
+                fi
+            fi
+        done
+    fi
+    
+    # If no good Framework Python found, check system python3
+    if [ -z "$best_python" ]; then
+        local sys_python=$(which python3)
+        if [ -x "$sys_python" ] && check_python_ssl_support "$sys_python"; then
+            best_python="$sys_python"
+            best_version="system"
+        fi
+    fi
+    
+    # If still no good Python found, fallback to system python3
+    if [ -z "$best_python" ]; then
+        best_python=$(which python3)
+        best_version="system-fallback"
+        log "WARNING: No Python with good SSL support found, using fallback: $best_python"
+    fi
+    
+    echo "$best_python"
+    log "Selected Python: $best_python (version: $best_version)"
+}
+
+check_python_ssl_support() {
+    local python_path="$1"
+    
+    # Quick check: can we import ssl and is it OpenSSL 1.1.1+ or OpenSSL 3.x?
+    "$python_path" -c "
+import ssl
+import sys
+version = ssl.OPENSSL_VERSION
+# Check for OpenSSL 1.1.1+ or OpenSSL 3.x (good SSL support)
+if 'OpenSSL 1.1.1' in version or 'OpenSSL 3.' in version or 'OpenSSL 1.1.0' in version:
+    sys.exit(0)
+# LibreSSL 2.8.3 and older have issues, but newer LibreSSL is okay
+elif 'LibreSSL' in version:
+    # Extract LibreSSL version
+    import re
+    match = re.search(r'LibreSSL (\d+)\.(\d+)\.(\d+)', version)
+    if match:
+        major, minor, patch = map(int, match.groups())
+        # LibreSSL 3.0+ is generally okay
+        if major >= 3:
+            sys.exit(0)
+        # LibreSSL 2.9+ is better than 2.8.3
+        elif major == 2 and minor >= 9:
+            sys.exit(0)
+    # Old LibreSSL versions have issues
+    sys.exit(1)
+else:
+    # Unknown SSL library, assume it's okay
+    sys.exit(0)
+" 2>/dev/null
+    
+    return $?
+}
+
+PYTHON_CMD=$(find_best_python)
+
+# Check if virtual environment needs to be recreated
+RECREATE_VENV=false
+if [ -d "$VENV_PATH" ]; then
+    # Check if the virtual environment is using a compatible Python version
+    if [ -x "$VENV_PATH/bin/python" ]; then
+        VENV_PYTHON_VERSION=$("$VENV_PATH/bin/python" --version 2>&1 | cut -d' ' -f2)
+        VENV_SSL_VERSION=$("$VENV_PATH/bin/python" -c "import ssl; print(ssl.OPENSSL_VERSION)" 2>/dev/null || echo "unknown")
+        
+        log "Virtual environment Python version: $VENV_PYTHON_VERSION"
+        log "Virtual environment SSL version: $VENV_SSL_VERSION"
+        
+        # Check if virtual environment is using LibreSSL (problematic)
+        if [[ "$VENV_SSL_VERSION" == *"LibreSSL"* ]]; then
+            log "Virtual environment is using LibreSSL, which has SSL compatibility issues"
+            log "Recreating virtual environment with newer Python..."
+            RECREATE_VENV=true
+        fi
+        
+        # Check if virtual environment Python is too old
+        VENV_MAJOR=$(echo "$VENV_PYTHON_VERSION" | cut -d. -f1)
+        VENV_MINOR=$(echo "$VENV_PYTHON_VERSION" | cut -d. -f2)
+        if [ "$VENV_MAJOR" -lt 3 ] || [ "$VENV_MAJOR" -eq 3 -a "$VENV_MINOR" -lt 11 ]; then
+            log "Virtual environment Python version is too old: $VENV_PYTHON_VERSION"
+            log "Recreating virtual environment with newer Python..."
+            RECREATE_VENV=true
+        fi
+    else
+        log "Virtual environment Python not found, recreating..."
+        RECREATE_VENV=true
+    fi
+fi
+
+if [ ! -d "$VENV_PATH" ] || [ "$RECREATE_VENV" = true ]; then
+    if [ "$RECREATE_VENV" = true ]; then
+        log "Removing old virtual environment..."
+        rm -rf "$VENV_PATH"
+    fi
+    
+    log "Creating Python virtual environment with $PYTHON_CMD..."
+    "$PYTHON_CMD" -m venv "$VENV_PATH"
     
     # Activate and install dependencies
     source "$VENV_PATH/bin/activate"
@@ -159,6 +278,10 @@ if [ ! -d "$VENV_PATH" ]; then
     
     deactivate
     log "Virtual environment setup complete"
+    
+    # Log the final SSL version for debugging
+    FINAL_SSL_VERSION=$("$VENV_PATH/bin/python" -c "import ssl; print(ssl.OPENSSL_VERSION)" 2>/dev/null || echo "unknown")
+    log "Final virtual environment SSL version: $FINAL_SSL_VERSION"
 fi
 
 # Generate config if it doesn't exist

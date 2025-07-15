@@ -249,28 +249,105 @@ class SecureUpdater:
                 import ssl
                 import platform
                 
-                ssl_context = ssl.create_default_context()
+                # Try multiple SSL configurations for better compatibility
+                ssl_configs = []
                 
-                # Handle LibreSSL on macOS by setting appropriate TLS version and ciphers
+                # Config 1: Default context
+                try:
+                    ssl_context1 = ssl.create_default_context()
+                    ssl_configs.append(("Default SSL", ssl_context1))
+                except Exception as e:
+                    logger.warning(f"Default SSL context failed: {e}")
+                
+                # Config 2: TLS 1.2 specifically (good compatibility)
+                try:
+                    ssl_context2 = ssl.create_default_context()
+                    ssl_context2.minimum_version = ssl.TLSVersion.TLSv1_2
+                    ssl_context2.maximum_version = ssl.TLSVersion.TLSv1_2
+                    ssl_configs.append(("TLS 1.2", ssl_context2))
+                except Exception as e:
+                    logger.warning(f"TLS 1.2 context failed: {e}")
+                
+                # Config 3: LibreSSL optimized for macOS
                 if platform.system() == "Darwin":
-                    # Force TLS 1.2+ for LibreSSL compatibility
-                    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-                    ssl_context.maximum_version = ssl.TLSVersion.TLSv1_3
-                    # Set ciphers that work well with LibreSSL
-                    ssl_context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
+                    try:
+                        ssl_context3 = ssl.create_default_context()
+                        ssl_context3.minimum_version = ssl.TLSVersion.TLSv1_2
+                        ssl_context3.maximum_version = ssl.TLSVersion.TLSv1_3
+                        # Set ciphers that work well with LibreSSL
+                        ssl_context3.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDHE+AES256:DHE+AES256:!aNULL:!MD5:!DSS')
+                        ssl_configs.append(("LibreSSL Optimized", ssl_context3))
+                    except Exception as e:
+                        logger.warning(f"LibreSSL optimized context failed: {e}")
                 
-                # Install SSL context for urllib
-                https_handler = urllib.request.HTTPSHandler(context=ssl_context)
-                opener = urllib.request.build_opener(https_handler)
-                urllib.request.install_opener(opener)
+                # Config 4: Broad TLS range
+                try:
+                    ssl_context4 = ssl.create_default_context()
+                    ssl_context4.minimum_version = ssl.TLSVersion.TLSv1_2
+                    # Don't set maximum to allow negotiation
+                    ssl_configs.append(("TLS 1.2+ Range", ssl_context4))
+                except Exception as e:
+                    logger.warning(f"TLS 1.2+ range context failed: {e}")
                 
-                # Download core file
-                core_temp_path = temp_path / "lightscope_core.py"
-                urllib.request.urlretrieve(core_url, core_temp_path)
+                # Try each SSL configuration
+                download_success = False
+                for config_name, ssl_context in ssl_configs:
+                    try:
+                        logger.info(f"Trying download with {config_name}")
+                        
+                        # Install SSL context for urllib
+                        https_handler = urllib.request.HTTPSHandler(context=ssl_context)
+                        opener = urllib.request.build_opener(https_handler)
+                        urllib.request.install_opener(opener)
+                        
+                        # Download core file
+                        core_temp_path = temp_path / "lightscope_core.py"
+                        urllib.request.urlretrieve(core_url, core_temp_path)
+                        
+                        # Download signature
+                        sig_temp_path = temp_path / "lightscope_core.py.sig"
+                        urllib.request.urlretrieve(signature_url, sig_temp_path)
+                        
+                        logger.info(f"Successfully downloaded files using {config_name}")
+                        download_success = True
+                        break
+                        
+                    except urllib.error.URLError as e:
+                        if hasattr(e, 'reason') and 'SSL' in str(e.reason):
+                            logger.warning(f"SSL download failed with {config_name}: {e}")
+                            continue
+                        else:
+                            logger.error(f"URL error with {config_name}: {e}")
+                            continue
+                    except Exception as e:
+                        logger.warning(f"Download failed with {config_name}: {e}")
+                        continue
                 
-                # Download signature
-                sig_temp_path = temp_path / "lightscope_core.py.sig"
-                urllib.request.urlretrieve(signature_url, sig_temp_path)
+                # If all SSL configs failed, try basic urllib without custom SSL
+                if not download_success:
+                    logger.info("All SSL configurations failed, trying basic urllib")
+                    try:
+                        # Reset to default opener
+                        urllib.request.install_opener(urllib.request.build_opener())
+                        
+                        # Download core file
+                        core_temp_path = temp_path / "lightscope_core.py"
+                        urllib.request.urlretrieve(core_url, core_temp_path)
+                        
+                        # Download signature
+                        sig_temp_path = temp_path / "lightscope_core.py.sig"
+                        urllib.request.urlretrieve(signature_url, sig_temp_path)
+                        
+                        logger.info("Successfully downloaded files using basic urllib")
+                        download_success = True
+                        
+                    except Exception as e:
+                        logger.error(f"Basic urllib download also failed: {e}")
+                        return False
+                
+                if not download_success:
+                    logger.error("All download attempts failed")
+                    return False
                 
                 # Verify signature
                 if not self.verify_signature(core_temp_path, sig_temp_path):

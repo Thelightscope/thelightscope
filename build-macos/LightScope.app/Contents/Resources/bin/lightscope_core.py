@@ -27,168 +27,6 @@ import psutil
 import requests
 import copy
 
-# SSL imports for the new helper
-import ssl
-import certifi
-from requests.adapters import HTTPAdapter
-from urllib3.poolmanager import PoolManager
-
-# New SSL helper classes and functions
-class SSLContextAdapter(HTTPAdapter):
-    """Let us mount a custom SSLContext on a Session."""
-    def __init__(self, ssl_context, **kwargs):
-        self._ssl_context = ssl_context
-        super().__init__(**kwargs)
-
-    def init_poolmanager(self, *args, **kwargs):
-        kwargs['ssl_context'] = self._ssl_context
-        return super().init_poolmanager(*args, **kwargs)
-
-    def proxy_manager_for(self, *args, **kwargs):
-        kwargs['ssl_context'] = self._ssl_context
-        return super().proxy_manager_for(*args, **kwargs)
-
-
-def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
-    """
-    Try different SSL configurations to find one that works.
-    Returns a Session that successfully connects.
-    """
-    # Try different SSL configurations in order of preference
-    ssl_configs = []
-    
-    # Config 1: Try TLS 1.2 using older constants
-    try:
-        ctx1 = ssl.create_default_context(
-            purpose=ssl.Purpose.SERVER_AUTH,
-            cafile=certifi.where()
-        )
-        ctx1.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx1.maximum_version = ssl.TLSVersion.TLSv1_2
-        ssl_configs.append(("TLS 1.2", ctx1))
-    except (ValueError, AttributeError) as e:
-        print(f"⚠️  TLS 1.2 configuration failed: {e}")
-    
-    # Config 2: Try TLS 1.3 with ChaCha20-Poly1305 (if available)
-    try:
-        ctx2 = ssl.create_default_context(
-            purpose=ssl.Purpose.SERVER_AUTH,
-            cafile=certifi.where()
-        )
-        ctx2.minimum_version = ssl.TLSVersion.TLSv1_3
-        ctx2.maximum_version = ssl.TLSVersion.TLSv1_3
-        try:
-            ctx2.set_ciphers("AEAD-CHACHA20-POLY1305-SHA256")
-            ssl_configs.append(("TLS 1.3 with ChaCha20", ctx2))
-        except ssl.SSLError as cipher_error:
-            print(f"⚠️  ChaCha20-Poly1305 cipher not available: {cipher_error}")
-            # Try TLS 1.3 without specific cipher
-            ctx2 = ssl.create_default_context(
-                purpose=ssl.Purpose.SERVER_AUTH,
-                cafile=certifi.where()
-            )
-            ctx2.minimum_version = ssl.TLSVersion.TLSv1_3
-            ctx2.maximum_version = ssl.TLSVersion.TLSv1_3
-            ssl_configs.append(("TLS 1.3 default", ctx2))
-    except (ValueError, AttributeError) as e:
-        print(f"⚠️  TLS 1.3 configuration failed: {e}")
-    
-    # Config 3: Try older protocol constants as fallback
-    try:
-        ctx3 = ssl.create_default_context(
-            purpose=ssl.Purpose.SERVER_AUTH,
-            cafile=certifi.where()
-        )
-        # Use the older method for compatibility
-        ctx3.protocol = ssl.PROTOCOL_TLS_CLIENT
-        ctx3.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1  # Disable older versions
-        ssl_configs.append(("TLS Client Protocol", ctx3))
-    except (ValueError, AttributeError) as e:
-        print(f"⚠️  TLS Client protocol configuration failed: {e}")
-    
-    # Config 4: Try basic default context
-    try:
-        ctx4 = ssl.create_default_context(
-            purpose=ssl.Purpose.SERVER_AUTH,
-            cafile=certifi.where()
-        )
-        ssl_configs.append(("Default SSL Context", ctx4))
-    except Exception as e:
-        print(f"⚠️  Default SSL context failed: {e}")
-    
-    # Config 5: Try with modern cipher suites
-    try:
-        ctx5 = ssl.create_default_context(
-            purpose=ssl.Purpose.SERVER_AUTH,
-            cafile=certifi.where()
-        )
-        # Try common modern ciphers that LibreSSL supports
-        ctx5.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
-        ssl_configs.append(("Modern Ciphers", ctx5))
-    except (ssl.SSLError, ValueError, AttributeError) as e:
-        print(f"⚠️  Modern cipher configuration failed: {e}")
-
-    # Try each configuration
-    for config_name, ctx in ssl_configs:
-        sess = requests.Session()
-        sess.mount("https://", SSLContextAdapter(ctx))
-        sess.verify = certifi.where()
-
-        try:
-            # Use GET instead of HEAD since server may not support HEAD
-            resp = sess.get(test_url, timeout=5)
-            resp.raise_for_status()
-            print(f"✔️  Connected with {config_name}")
-            return sess
-        except requests.exceptions.HTTPError as e:
-            # 405 Method Not Allowed means SSL handshake succeeded
-            if e.response.status_code == 405:
-                print(f"✔️  Connected with {config_name} (SSL handshake successful)")
-                return sess
-            else:
-                print(f"⚠️  HTTP error with {config_name}: {e}")
-                continue
-        except requests.exceptions.SSLError as e:
-            print(f"⚠️  Handshake with {config_name} failed: {e}")
-            continue
-        except requests.exceptions.RequestException as e:
-            print(f"⚠️  Unexpected error testing {config_name}: {e}")
-            continue
-
-    # If all SSL configs failed, try basic requests session as last resort
-    print("⚠️  All SSL configurations failed, trying basic session...")
-    try:
-        basic_session = requests.Session()
-        resp = basic_session.get(test_url, timeout=5)
-        resp.raise_for_status()
-        print("✔️  Connected with basic session (no SSL customization)")
-        return basic_session
-    except requests.exceptions.HTTPError as e:
-        # 405 Method Not Allowed means SSL handshake succeeded
-        if e.response.status_code == 405:
-            print("✔️  Connected with basic session (SSL handshake successful)")
-            return basic_session
-        else:
-            print(f"⚠️  Basic session HTTP error: {e}")
-    except Exception as e:
-        print(f"⚠️  Basic session also failed: {e}")
-
-    raise RuntimeError("Could not negotiate any SSL connection with the server")
-
-
-def make_data_session(test_url="https://thelightscope.com/log_mysql_data"):
-    """
-    Create a session optimized for data upload endpoints.
-    """
-    return make_heartbeat_session(test_url)
-
-
-def make_info_session(test_url="https://thelightscope.com/ipinfo"):
-    """
-    Create a session optimized for info endpoints.
-    """
-    return make_heartbeat_session(test_url)
-
 ls_version = "1.0.3"
 
 print(f"ls_version: {ls_version}")
@@ -805,7 +643,6 @@ class Ports:
             return True
         else:
             return False
-        
         
     def is_ip_src_on_local_network(self,ip_src):
         if ip_src in self.internal_ips['ipv4'] or ip_src in self.internal_ips['ipv6'] or ip_src==self.external_ip:
@@ -1522,13 +1359,10 @@ def send_honeypot_data(consumer_upload_conn):
     IDLE_FLUSH_SEC = 5.0    # flush data if idle this long
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
-    # Use the new SSL helper to create a working session
-    try:
-        session = make_data_session(DATA_URL)
-    except RuntimeError as e:
-        print(f"[honeypot] Could not establish SSL connection: {e}")
-        # Fallback to basic session if SSL helper fails
-        session = requests.Session()
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=2, pool_maxsize=2)
+    session.mount("https://", adapter)
+    session.mount("http://",  adapter)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
@@ -1607,13 +1441,10 @@ def send_data(consumer_upload_conn):
     IDLE_FLUSH_SEC = 5.0    # flush data if idle this long
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
-    # Use the new SSL helper to create a working session
-    try:
-        session = make_data_session(DATA_URL)
-    except RuntimeError as e:
-        print(f"[data] Could not establish SSL connection: {e}")
-        # Fallback to basic session if SSL helper fails
-        session = requests.Session()
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4)
+    session.mount("https://", adapter)
+    session.mount("http://",  adapter)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
@@ -2081,15 +1912,7 @@ def check_ip_is_private(ip_str):
 
 def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
     try:
-        # Use the new SSL helper to create a working session
-        try:
-            session = make_info_session(url)
-        except RuntimeError as e:
-            print(f"[info] Could not establish SSL connection: {e}")
-            # Fallback to basic session if SSL helper fails
-            session = requests.Session()
-        
-        resp = session.get(url, timeout=10)  # Increased timeout from 5 to 10 seconds
+        resp = requests.get(url, timeout=10)  # Increased timeout from 5 to 10 seconds
         resp.raise_for_status()
         data = resp.json()
 
