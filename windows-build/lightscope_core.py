@@ -27,7 +27,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.3"
+ls_version = "1.0.7"
 
 print(f"ls_version: {ls_version}")
 
@@ -1971,7 +1971,11 @@ def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
 
 def lightscope_run():
     if  platforminfo.system() != "Windows":
-        from systemd import daemon
+        try:
+            from systemd import daemon
+        except ImportError:
+            # systemd not available (e.g., on macOS)
+            pass
         
         config_reader = configuration_reader()
         config_settings = config_reader.get_config()

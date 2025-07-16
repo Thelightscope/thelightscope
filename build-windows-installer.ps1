@@ -189,7 +189,7 @@ function Build-Installer {
     Get-ChildItem $BuildDir | ForEach-Object { Write-ColoredOutput "  - $($_.Name)" "White" }
     
     # Build installer
-    $InstallerPath = Join-Path $OutputDir "LightScope-$Version-Setup.exe"
+    $InstallerPath = Join-Path $OutputDir "lightscope_latest.exe"
     $NSISArgs = @("/DOUTFILE=`"$InstallerPath`"", "`"$NSISScript`"")
     
     # Ensure output directory exists
@@ -235,11 +235,15 @@ function Build-Installer {
     }
     
     if ($Process.ExitCode -eq 0) {
-        # NSIS creates the file in the build directory, we need to move it to output directory
-        $ActualInstallerPath = Join-Path $BuildDir "LightScope-$Version-Setup.exe"
+        # NSIS creates the file in the build directory, find whatever file was actually created
+        $CreatedExeFiles = Get-ChildItem $BuildDir -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*LightScope*" }
         
-        if (Test-Path $ActualInstallerPath) {
-            # Move the installer to the correct output location
+        if ($CreatedExeFiles.Count -gt 0) {
+            # Use the first (and likely only) installer file found
+            $ActualInstallerPath = $CreatedExeFiles[0].FullName
+            Write-ColoredOutput "Found installer: $($CreatedExeFiles[0].Name)" "Cyan"
+            
+            # Move and rename the installer to the correct output location
             Move-Item $ActualInstallerPath $InstallerPath -Force
             Write-ColoredOutput "OK Installer built successfully: $(Split-Path $InstallerPath -Leaf)" "Green"
             
@@ -249,8 +253,7 @@ function Build-Installer {
             
             return $InstallerPath
         } else {
-            Write-ColoredOutput "Error: NSIS compiled successfully but installer not found at expected location" "Red"
-            Write-ColoredOutput "Expected at: $ActualInstallerPath" "Red"
+            Write-ColoredOutput "Error: NSIS compiled successfully but no installer exe found" "Red"
             Write-ColoredOutput "Looking for files in build directory:" "Red"
             Get-ChildItem $BuildDir -Filter "*.exe" | ForEach-Object { 
                 Write-ColoredOutput "  Found: $($_.Name)" "Yellow" 
@@ -386,7 +389,7 @@ LightScope Windows Installation Instructions
 ==========================================
 
 AUTOMATIC INSTALLATION (Recommended):
-1. Run LightScope-$Version-Setup.exe as Administrator
+1. Run lightscope_latest.exe as Administrator
 2. Follow the installation wizard
 3. LightScope will start automatically in the background
 
@@ -432,8 +435,121 @@ For support, visit: https://thelightscope.com/
     Write-ColoredOutput "OK Distribution package created: $(Split-Path $ArchivePath -Leaf)" "Green"
 }
 
-function Show-Summary {
+function Test-SSHTools {
+    Write-ColoredOutput "=== Checking SSH Tools ===" "Yellow"
+    
+    # Check if OpenSSH is available (comes with Windows 10/11)
+    try {
+        $sshVersion = ssh -V 2>&1
+        Write-ColoredOutput "OK SSH found: $sshVersion" "Green"
+    } catch {
+        Write-ColoredOutput "Error: SSH not found" "Red"
+        Write-ColoredOutput "Please install OpenSSH or use Git Bash" "Red"
+        return $false
+    }
+    
+    try {
+        $scpVersion = scp -V 2>&1
+        Write-ColoredOutput "OK SCP found: $scpVersion" "Green"
+    } catch {
+        Write-ColoredOutput "Error: SCP not found" "Red"
+        Write-ColoredOutput "Please install OpenSSH or use Git Bash" "Red"
+        return $false
+    }
+    
+    return $true
+}
+
+function Upload-Installer {
     param([string]$InstallerPath)
+    
+    Write-ColoredOutput "=== Uploading to Server ===" "Yellow"
+    
+    if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
+        Write-ColoredOutput "Error: Installer not found - skipping upload" "Red"
+        return $false
+    }
+    
+    # Test SSH tools
+    if (-not (Test-SSHTools)) {
+        Write-ColoredOutput "Error: SSH tools not available - skipping upload" "Red"
+        return $false
+    }
+    
+    $ServerUser = "kapitans"
+    $ServerHost = "lightscope.isi.edu"
+    $TempPath = "/tmp/"
+    $FinalPath = "/var/www/lightscope/latest/"
+    $InstallerName = Split-Path $InstallerPath -Leaf
+    
+    Write-ColoredOutput "Uploading $InstallerName to $ServerUser@$ServerHost..." "Cyan"
+    
+    # Step 1: SCP upload to /tmp
+    Write-ColoredOutput "Step 1: Uploading to /tmp..." "Cyan"
+    try {
+        $scpArgs = @($InstallerPath, "$ServerUser@$ServerHost`:$TempPath")
+        $scpProcess = Start-Process -FilePath "scp" -ArgumentList $scpArgs -NoNewWindow -Wait -PassThru
+        
+        if ($scpProcess.ExitCode -eq 0) {
+            Write-ColoredOutput "OK File uploaded to /tmp successfully" "Green"
+        } else {
+            Write-ColoredOutput "Error: SCP upload failed with exit code $($scpProcess.ExitCode)" "Red"
+            return $false
+        }
+    } catch {
+        Write-ColoredOutput "Error: SCP upload failed: $($_.Exception.Message)" "Red"
+        return $false
+    }
+    
+    # Step 2: Move file from /tmp to final location
+    Write-ColoredOutput "Step 2: Moving file to final location..." "Cyan"
+    Write-ColoredOutput "Note: You will be prompted for your password to run sudo" "Yellow"
+    try {
+        $moveCommand = "sudo mv $TempPath$InstallerName $FinalPath"
+        $userHost = "$ServerUser@$ServerHost"
+        $sshArgs = @("-t", $userHost, $moveCommand)
+        
+        Write-ColoredOutput "Executing: ssh -t $userHost '$moveCommand'" "Cyan"
+        
+        # Use Start-Process with -Wait to allow interactive password entry
+        $sshProcess = Start-Process -FilePath "ssh" -ArgumentList $sshArgs -NoNewWindow -Wait -PassThru
+        
+        if ($sshProcess.ExitCode -eq 0) {
+            Write-ColoredOutput "OK File moved to $FinalPath successfully" "Green"
+        } else {
+            Write-ColoredOutput "Error: SSH move command failed with exit code $($sshProcess.ExitCode)" "Red"
+            Write-ColoredOutput "Trying alternative approach..." "Yellow"
+            
+            # Alternative: Try with explicit shell command
+            $altCommand = "bash -c 'sudo mv $TempPath$InstallerName $FinalPath'"
+            $altSshArgs = @("-t", $userHost, $altCommand)
+            Write-ColoredOutput "Executing: ssh -t $userHost '$altCommand'" "Cyan"
+            $altSshProcess = Start-Process -FilePath "ssh" -ArgumentList $altSshArgs -NoNewWindow -Wait -PassThru
+            
+            if ($altSshProcess.ExitCode -eq 0) {
+                Write-ColoredOutput "OK File moved to $FinalPath successfully (alternative method)" "Green"
+            } else {
+                Write-ColoredOutput "Error: Both SSH move attempts failed" "Red"
+                Write-ColoredOutput "Manual commands to complete the deployment:" "Yellow"
+                Write-ColoredOutput "  ssh -t $userHost 'sudo mv $TempPath$InstallerName $FinalPath'" "Yellow"
+                return $false
+            }
+        }
+    } catch {
+        Write-ColoredOutput "Error: SSH move failed: $($_.Exception.Message)" "Red"
+        Write-ColoredOutput "Manual commands to complete the deployment:" "Yellow"
+        Write-ColoredOutput "  ssh -t $userHost 'sudo mv $TempPath$InstallerName $FinalPath'" "Yellow"
+        return $false
+    }
+    
+    Write-ColoredOutput "OK Installer successfully deployed to server!" "Green"
+    Write-ColoredOutput "Download URL: https://lightscope.isi.edu/latest/lightscope_latest.exe" "Cyan"
+    
+    return $true
+}
+
+function Show-Summary {
+    param([string]$InstallerPath, [bool]$UploadSuccess = $false)
     
     $Version = Get-Version
     
@@ -453,24 +569,48 @@ function Show-Summary {
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "Files created in windows-output/:" "White"
     if ($InstallerExists) {
-        Write-ColoredOutput "  1. LightScope-$Version-Setup.exe ($($InstallerSize) MB) - Windows Installer" "White"
+        Write-ColoredOutput "  1. lightscope_latest.exe ($($InstallerSize) MB) - Windows Installer" "White"
     } else {
-        Write-ColoredOutput "  1. LightScope-$Version-Setup.exe - FAILED TO CREATE" "Red"
+        Write-ColoredOutput "  1. lightscope_latest.exe - FAILED TO CREATE" "Red"
     }
     Write-ColoredOutput "  2. lightscope_v$Version`_windows.zip - Complete distribution package" "White"
     Write-ColoredOutput "" "White"
+    
+    if ($UploadSuccess) {
+        Write-ColoredOutput "SERVER DEPLOYMENT:" "Cyan"
+        Write-ColoredOutput "============================================" "Cyan"
+        Write-ColoredOutput "" "White"
+        Write-ColoredOutput "✓ Installer uploaded to server successfully" "Green"
+        Write-ColoredOutput "✓ Available at: https://lightscope.isi.edu/latest/lightscope_latest.exe" "Green"
+        Write-ColoredOutput "" "White"
+    } else {
+        Write-ColoredOutput "SERVER DEPLOYMENT:" "Cyan"
+        Write-ColoredOutput "============================================" "Cyan"
+        Write-ColoredOutput "" "White"
+        Write-ColoredOutput "✗ Installer upload failed or was skipped" "Red"
+        Write-ColoredOutput "Manual upload required:" "Yellow"
+        Write-ColoredOutput "  scp lightscope_latest.exe kapitans@lightscope.isi.edu:/tmp/" "Yellow"
+        Write-ColoredOutput "  ssh kapitans@lightscope.isi.edu 'sudo mv /tmp/lightscope_latest.exe /var/www/lightscope/latest/'" "Yellow"
+        Write-ColoredOutput "" "White"
+    }
+    
     Write-ColoredOutput "DEPLOYMENT INSTRUCTIONS:" "Cyan"
     Write-ColoredOutput "============================================" "Cyan"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR END USERS:" "Yellow"
-    Write-ColoredOutput "- Download and run LightScope-$Version-Setup.exe as Administrator" "White"
+    Write-ColoredOutput "- Download and run lightscope_latest.exe as Administrator" "White"
     Write-ColoredOutput "- The installer creates a virtual environment and installs dependencies" "White"
     Write-ColoredOutput "- LightScope runs in the virtual environment automatically (background mode)" "White"
     Write-ColoredOutput "- No visible command prompt window - runs silently in background" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR DISTRIBUTION:" "Yellow"
-    Write-ColoredOutput "- Upload LightScope-$Version-Setup.exe to your download server" "White"
-    Write-ColoredOutput "- Update your website download links" "White"
+    if ($UploadSuccess) {
+        Write-ColoredOutput "- Installer is already available at: https://lightscope.isi.edu/latest/lightscope_latest.exe" "White"
+        Write-ColoredOutput "- No need to update download links - same URL every time!" "White"
+    } else {
+        Write-ColoredOutput "- Upload lightscope_latest.exe to your download server" "White"
+        Write-ColoredOutput "- Update your website download links" "White"
+    }
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "TESTING:" "Cyan"
     Write-ColoredOutput "============================================" "Cyan"
@@ -523,7 +663,11 @@ try {
     Create-DistributionPackage -InstallerPath $InstallerPath
     
     Write-ColoredOutput "" "White"
-    Show-Summary -InstallerPath $InstallerPath
+    Write-ColoredOutput "7. Uploading to server..." "Yellow"
+    $UploadSuccess = Upload-Installer -InstallerPath $InstallerPath
+    
+    Write-ColoredOutput "" "White"
+    Show-Summary -InstallerPath $InstallerPath -UploadSuccess $UploadSuccess
     
 } catch {
     Write-ColoredOutput "Error: $($_.Exception.Message)" "Red"
