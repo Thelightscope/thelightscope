@@ -56,6 +56,14 @@ fi
 echo "Copying configuration files..."
 cp debian_package/usr/share/lightscope/config.ini.example "$APP_DIR/Contents/Resources/config/"
 
+# Copy public key for update verification
+echo "Copying public key for update verification..."
+if [ -f "lightscope-public.pem" ]; then
+    cp lightscope-public.pem "$APP_DIR/Contents/Resources/config/"
+else
+    echo "Warning: lightscope-public.pem not found - updates will be disabled"
+fi
+
 # Create Info.plist for the app bundle
 cat > "$APP_DIR/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>

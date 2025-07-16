@@ -170,7 +170,7 @@ class SecureUpdater:
                 # Set ciphers that work well with LibreSSL
                 ssl_context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS')
             
-            response = urllib.request.urlopen(UPDATE_CHECK_URL, timeout=30, context=ssl_context)
+            response = urllib.request.urlopen(UPDATE_CHECK_URL, context=ssl_context, timeout=30)
             response_data = response.read().decode('utf-8')
             logger.info(f"Server response received from {UPDATE_CHECK_URL}")
             logger.debug(f"Server response content: {response_data}")
