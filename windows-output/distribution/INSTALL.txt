@@ -2,7 +2,7 @@
 ==========================================
 
 AUTOMATIC INSTALLATION (Recommended):
-1. Run LightScope-1.0.3-Setup.exe as Administrator
+1. Run lightscope_latest.exe as Administrator
 2. Follow the installation wizard
 3. LightScope will start automatically in the background
 

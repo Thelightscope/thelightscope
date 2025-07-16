@@ -5,7 +5,7 @@
 ; General
 
 !define PRODUCT_NAME "LightScope"
-!define PRODUCT_VERSION "1.0.3"
+!define PRODUCT_VERSION "1.0.7"
 !define PRODUCT_PUBLISHER "TheLightScope"
 !define PRODUCT_WEB_SITE "https://thelightscope.com"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\lightscope.exe"
