@@ -2,8 +2,10 @@ LICENSE
 README.md
 pyproject.toml
 lightscope/__main__.py
+lightscope/lightscope-runner-mac.py
 lightscope/lightscope.py
 lightscope/lightscope_core.py
+lightscope/lightscope_core_mac.py
 lightscope.egg-info/PKG-INFO
 lightscope.egg-info/SOURCES.txt
 lightscope.egg-info/dependency_links.txt

@@ -27,7 +27,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.2"
+ls_version = "1.0.4"
 
 print(f"ls_version: {ls_version}")
 
@@ -1298,7 +1298,7 @@ class Ports:
 
 
             if (now - prior_time) >= 1:
-                ###print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
+                print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
                 packets_processed=0
                 prior_time=now
                     
@@ -1711,7 +1711,7 @@ def read_from_interface_windows(network_interface,
             to_send = 0
 
             if (now - prior_time) >= IDLE_FLUSH_SECS:
-                ###print(f"len(send_deque) {len(send_deque)} pps {packets_processed} {interface_human_readable}", flush=True)
+                print(f"read_from_interface_windows len(send_deque) {len(send_deque)} pps {packets_processed} {interface_human_readable}", flush=True)
                 packets_processed = 0
                 prior_time = now
 
@@ -1971,7 +1971,11 @@ def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
 
 def lightscope_run():
     if  platforminfo.system() != "Windows":
-        from systemd import daemon
+        try:
+            from systemd import daemon
+        except ImportError:
+            # systemd not available (e.g., on macOS)
+            pass
         
         config_reader = configuration_reader()
         config_settings = config_reader.get_config()

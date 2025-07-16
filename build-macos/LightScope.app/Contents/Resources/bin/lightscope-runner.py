@@ -153,7 +153,14 @@ class SecureUpdater:
             import ssl
             import platform
             
-            ssl_context = ssl.create_default_context()
+            # Use certifi for CA certificates to fix SSL verification on macOS
+            try:
+                import certifi
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+                logger.info("Using certifi CA certificates for SSL verification")
+            except ImportError:
+                logger.warning("certifi not available, using default SSL context")
+                ssl_context = ssl.create_default_context()
             
             # Handle LibreSSL on macOS by setting appropriate TLS version and ciphers
             if platform.system() == "Darwin":
@@ -249,43 +256,52 @@ class SecureUpdater:
                 import ssl
                 import platform
                 
+                # Helper function to create SSL context with certifi
+                def create_ssl_context_with_certifi():
+                    try:
+                        import certifi
+                        return ssl.create_default_context(cafile=certifi.where())
+                    except ImportError:
+                        logger.warning("certifi not available, using default SSL context")
+                        return ssl.create_default_context()
+                
                 # Try multiple SSL configurations for better compatibility
                 ssl_configs = []
                 
-                # Config 1: Default context
+                # Config 1: Default context with certifi
                 try:
-                    ssl_context1 = ssl.create_default_context()
-                    ssl_configs.append(("Default SSL", ssl_context1))
+                    ssl_context1 = create_ssl_context_with_certifi()
+                    ssl_configs.append(("Default SSL with certifi", ssl_context1))
                 except Exception as e:
                     logger.warning(f"Default SSL context failed: {e}")
                 
                 # Config 2: TLS 1.2 specifically (good compatibility)
                 try:
-                    ssl_context2 = ssl.create_default_context()
+                    ssl_context2 = create_ssl_context_with_certifi()
                     ssl_context2.minimum_version = ssl.TLSVersion.TLSv1_2
                     ssl_context2.maximum_version = ssl.TLSVersion.TLSv1_2
-                    ssl_configs.append(("TLS 1.2", ssl_context2))
+                    ssl_configs.append(("TLS 1.2 with certifi", ssl_context2))
                 except Exception as e:
                     logger.warning(f"TLS 1.2 context failed: {e}")
                 
                 # Config 3: LibreSSL optimized for macOS
                 if platform.system() == "Darwin":
                     try:
-                        ssl_context3 = ssl.create_default_context()
+                        ssl_context3 = create_ssl_context_with_certifi()
                         ssl_context3.minimum_version = ssl.TLSVersion.TLSv1_2
                         ssl_context3.maximum_version = ssl.TLSVersion.TLSv1_3
                         # Set ciphers that work well with LibreSSL
                         ssl_context3.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDHE+AES256:DHE+AES256:!aNULL:!MD5:!DSS')
-                        ssl_configs.append(("LibreSSL Optimized", ssl_context3))
+                        ssl_configs.append(("LibreSSL Optimized with certifi", ssl_context3))
                     except Exception as e:
                         logger.warning(f"LibreSSL optimized context failed: {e}")
                 
                 # Config 4: Broad TLS range
                 try:
-                    ssl_context4 = ssl.create_default_context()
+                    ssl_context4 = create_ssl_context_with_certifi()
                     ssl_context4.minimum_version = ssl.TLSVersion.TLSv1_2
                     # Don't set maximum to allow negotiation
-                    ssl_configs.append(("TLS 1.2+ Range", ssl_context4))
+                    ssl_configs.append(("TLS 1.2+ Range with certifi", ssl_context4))
                 except Exception as e:
                     logger.warning(f"TLS 1.2+ range context failed: {e}")
                 

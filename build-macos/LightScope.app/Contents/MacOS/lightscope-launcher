@@ -174,7 +174,7 @@ if [ ! -d "$VENV_PATH" ] || [ "$RECREATE_VENV" = true ]; then
     
     log "Installing dependencies..."
     pip install --upgrade pip
-    pip install dpkt psutil requests cryptography plyer
+    pip install dpkt psutil requests cryptography plyer certifi
     
     # Install local python-libpcap if available
     if [ -d "$RESOURCES_DIR/python-libpcap" ]; then

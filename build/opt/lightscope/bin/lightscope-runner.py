@@ -28,14 +28,24 @@ try:
     SYSTEMD_AVAILABLE = True
 except ImportError:
     SYSTEMD_AVAILABLE = False
-    logger.warning("systemd module not available, watchdog notifications disabled")
+    # Note: logger not yet defined, will log this later
 
 # Configuration
-LIGHTSCOPE_HOME = Path("/opt/lightscope")
-CONFIG_DIR = LIGHTSCOPE_HOME / "config"
-UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
-LOGS_DIR = LIGHTSCOPE_HOME / "logs"
-BIN_DIR = LIGHTSCOPE_HOME / "bin"
+# Detect if running on macOS in app bundle or Linux
+if Path("/Applications/LightScope.app/Contents/Resources").exists():
+    # macOS app bundle
+    LIGHTSCOPE_HOME = Path("/Applications/LightScope.app/Contents/Resources")
+    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+    BIN_DIR = LIGHTSCOPE_HOME / "bin"
+else:
+    # Linux/standard installation
+    LIGHTSCOPE_HOME = Path("/opt/lightscope")
+    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+    BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
 runner_version = "1.0.0"
 
@@ -54,6 +64,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("lightscope-runner")
+
+# Log systemd availability warning if needed
+if not SYSTEMD_AVAILABLE:
+    logger.warning("systemd module not available, watchdog notifications disabled")
 
 # Global variables for thread coordination
 shutdown_event = threading.Event()
