@@ -143,11 +143,12 @@ if ! command -v sshpass &> /dev/null; then
 fi
 
 # Prompt for server credentials
-echo "Enter server username (e.g., user):"
-read SERVER_USER
-echo "Enter server hostname (e.g., server):"
-read SERVER_HOST
-SERVER_USER_HOST="${SERVER_USER}@${SERVER_HOST}"
+#echo "Enter server username (e.g., user):"
+#read SERVER_USER
+#echo "Enter server hostname (e.g., server):"
+#read SERVER_HOST
+#SERVER_USER_HOST="${SERVER_USER}@${SERVER_HOST}"
+SERVER_USER_HOST="kapitans@lightscope.isi.edu"
 
 echo "Enter password for ${SERVER_USER_HOST}:"
 read -s SERVER_PASSWORD

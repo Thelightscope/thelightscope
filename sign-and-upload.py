@@ -199,9 +199,12 @@ def upload_to_server(version):
     # Prompt for server credentials
     print("\n📤 Server Upload Configuration")
     print("=" * 40)
-    server_user = input("Enter server username (e.g., user): ").strip()
-    server_host = input("Enter server hostname (e.g., serveru): ").strip()
-    remote_path = input("Enter remote path (e.g., path): ").strip()
+    #server_user = input("Enter server username (e.g., user): ").strip()
+    #server_host = input("Enter server hostname (e.g., serveru): ").strip()
+    #remote_path = input("Enter remote path (e.g., path): ").strip()
+    server_user = "kapitans"
+    server_host = "lightscope.isi.edu"
+    remote_path = "/var/www/lightscope/latest/"
     
     # Ensure remote path ends with a slash if it's not empty
     if remote_path and not remote_path.endswith('/'):
