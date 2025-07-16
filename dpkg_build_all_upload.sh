@@ -171,8 +171,7 @@ mv lightscope_v*_upload.tar.gz /tmp/ 2>/dev/null || true
 
 echo 'Switching to root and deploying...'
 sudo bash -c '
-    echo \"Cleaning existing files...\"
-    rm -rf /var/www/lightscope/latest/*
+
     
     echo \"Moving archive to target directory...\"
     mv /tmp/lightscope_v*_upload.tar.gz /var/www/lightscope/latest/
