@@ -159,7 +159,7 @@ echo ""
 
 # Function to print with timestamp and immediate flush
 print_status() {
-    echo "⏰ $(date '+%H:%M:%S') - $1" 
+    echo "⏰ $(date '+%%H:%%M:%%S') - $1" 
     sync  # Force filesystem sync
 }
 
