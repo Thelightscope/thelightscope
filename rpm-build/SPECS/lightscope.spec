@@ -15,7 +15,7 @@ BuildArch:      noarch
 BuildRequires:  python3-devel
 BuildRequires:  pkgconfig
 BuildRequires:  gcc
-BuildRequires:       libpcap-devel
+
 
 
 # Runtime requirements
@@ -42,6 +42,12 @@ if ! rpm -q libpcap-devel >/dev/null 2>&1; then
       && dnf config-manager --set-enabled crb \
       && dnf clean metadata
 fi
+
+dnf install -y dnf-plugins-core
+dnf config-manager --set-enabled crb
+dnf clean metadata
+dnf install -y libpcap-devel
+
 
 
 
