@@ -73,6 +73,10 @@ def sign_file(file_path, private_key, signature_path):
         with open(file_path, 'rb') as f:
             file_data = f.read()
         
+        # Debug information
+        print(f"  Signing file size: {len(file_data)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
+        
         # Create signature
         signature = private_key.sign(
             file_data,
@@ -87,6 +91,7 @@ def sign_file(file_path, private_key, signature_path):
         with open(signature_path, 'wb') as f:
             f.write(signature)
         
+        print(f"  Signature size: {len(signature)} bytes")
         print(f"File signed successfully: {signature_path}")
         return True
         
@@ -112,7 +117,8 @@ def verify_signature(file_path, signature_path, public_key_path):
         
         # Load public key
         with open(public_key_path, 'rb') as f:
-            public_key = serialization.load_pem_public_key(f.read())
+            public_key_data = f.read()
+            public_key = serialization.load_pem_public_key(public_key_data)
         
         # Read file and signature
         with open(file_path, 'rb') as f:
@@ -120,6 +126,12 @@ def verify_signature(file_path, signature_path, public_key_path):
         
         with open(signature_path, 'rb') as f:
             signature = f.read()
+        
+        # Debug information
+        print(f"  File size: {len(file_data)} bytes")
+        print(f"  Signature size: {len(signature)} bytes")
+        print(f"  Public key size: {len(public_key_data)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
         
         # Verify signature
         public_key.verify(
@@ -136,7 +148,13 @@ def verify_signature(file_path, signature_path, public_key_path):
         return True
         
     except Exception as e:
-        print(f"Signature verification failed: {e}")
+        from cryptography.exceptions import InvalidSignature
+        if isinstance(e, InvalidSignature):
+            print(f"Signature verification failed: Invalid signature")
+            print(f"  This means the file was modified after signing OR wrong key pair")
+        else:
+            print(f"Signature verification failed: {e}")
+            print(f"  Exception type: {type(e).__name__}")
         print(f"  File: {file_path}")
         print(f"  Signature: {signature_path}")
         print(f"  Public key: {public_key_path}")
@@ -297,6 +315,42 @@ def main():
     # Load private key
     private_key = load_private_key(args.private_key)
     if not private_key:
+        sys.exit(1)
+    
+    # Verify that private and public keys match
+    print("Verifying key pair compatibility...")
+    try:
+        # Load public key
+        with open(args.public_key, 'rb') as f:
+            public_key = serialization.load_pem_public_key(f.read())
+        
+        # Test with a simple message
+        test_message = b"test message for key verification"
+        test_signature = private_key.sign(
+            test_message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        # Verify the test signature
+        public_key.verify(
+            test_signature,
+            test_message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        print("✅ Key pair verification successful - private and public keys match")
+        
+    except Exception as e:
+        print(f"❌ Key pair verification failed: {e}")
+        print("The private and public keys do not match!")
         sys.exit(1)
     
     # Extract version
