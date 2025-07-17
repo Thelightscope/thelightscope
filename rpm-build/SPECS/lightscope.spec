@@ -15,6 +15,7 @@ BuildArch:      noarch
 BuildRequires:  python3-devel
 BuildRequires:  pkgconfig
 BuildRequires:  gcc
+BuildRequires:       libpcap-devel
 
 
 # Runtime requirements
@@ -25,7 +26,7 @@ Requires:       python3-cffi
 Requires:       python3-pip
 Requires:       python3-devel
 Requires:       gcc
-Requires:       libpcap-devel
+
 
 
 %description
