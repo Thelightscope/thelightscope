@@ -45,8 +45,7 @@ dnf install -y dnf-plugins-core
 logger -t lightscope-install "dnf install -y dnf-plugins-core"
 dnf config-manager --set-enabled crb
 logger -t lightscope-install "dnf config-manager --set-enabled crb"
-dnf clean metadata
-logger -t lightscope-install "dnf clean metadata"
+
 logger -t lightscope-install "about to install dnf install -y libpcap-devel"
 
 dnf install -y libpcap-devel
