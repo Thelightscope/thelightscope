@@ -46,7 +46,10 @@ fi
 dnf install -y dnf-plugins-core
 dnf config-manager --set-enabled crb
 dnf clean metadata
+logger -t lightscope-install "dnf install -y libpcap-devel"
+
 dnf install -y libpcap-devel
+logger -t lightscope-install "dnf install -y libpcap-devel done"
 
 
 
@@ -59,6 +62,7 @@ dnf install -y libpcap-devel
 # No build needed for Python script
 
 %install
+logger -t lightscope-install "install section"
 rm -rf %{buildroot}
 
 # Create directory structure
@@ -178,7 +182,7 @@ chmod +x %{buildroot}/usr/bin/lightscope
 /usr/bin/lightscope
 
 %post
-
+logger -t lightscope-install "post section"
 # Send all output to stderr & enable tracing
 exec 1>&2
 set -x
