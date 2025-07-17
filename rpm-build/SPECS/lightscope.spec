@@ -25,6 +25,8 @@ Requires:       python3-cffi
 Requires:       python3-pip
 Requires:       python3-devel
 Requires:       gcc
+Requires:       libpcap-devel
+
 
 %description
 LightScope is a comprehensive network security monitoring solution that
@@ -190,9 +192,7 @@ print_status "📦 Installing Python packages into venv…"
 print_status "🔍 venv contents:"
 /opt/lightscope/venv/bin/pip freeze
 
-# 3) Fix ownership so the lightscope user can run it
-print_status "🔐 Chowning venv to lightscope:lightscope…"
-chown -R lightscope:lightscope /opt/lightscope/venv
+
 
 # 4) (Re)configure your systemd unit to use the venv’s python
 print_status "🔧 Pointing service at venv Python…"
@@ -234,6 +234,14 @@ if ! id -u lightscope; then
 else
     print_status "✅ System user 'lightscope' already exists"
 fi
+
+
+# 3) Fix ownership so the lightscope user can run it
+print_status "🔐 Chowning venv to lightscope:lightscope…"
+chown -R lightscope:lightscope /opt/lightscope/venv
+
+
+
 
 # Create directory structure and set permissions
 print_status "🔐 Setting up directory structure and permissions..."
