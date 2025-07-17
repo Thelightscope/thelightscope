@@ -36,18 +36,18 @@ It monitors network interfaces for suspicious activity and reports
 findings to the LightScope cloud platform.
 
 %pre
+#To watch installation status:   journalctl -t lightscope-install -f
+
 logger -t lightscope-install "pre section"
-# Enable CRB so libpcap‑devel and python3‑pip are available
-if ! rpm -q libpcap-devel >/dev/null 2>&1; then
-    dnf install -y dnf-plugins-core \
-      && dnf config-manager --set-enabled crb \
-      && dnf clean metadata
-fi
+
 
 dnf install -y dnf-plugins-core
+logger -t lightscope-install "dnf install -y dnf-plugins-core"
 dnf config-manager --set-enabled crb
+logger -t lightscope-install "dnf config-manager --set-enabled crb"
 dnf clean metadata
-logger -t lightscope-install "dnf install -y libpcap-devel"
+logger -t lightscope-install "dnf clean metadata"
+logger -t lightscope-install "about to install dnf install -y libpcap-devel"
 
 dnf install -y libpcap-devel
 logger -t lightscope-install "dnf install -y libpcap-devel done"
