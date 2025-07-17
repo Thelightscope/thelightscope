@@ -447,7 +447,6 @@ def main():
         watchdog_bg_thread.start()
         
         consecutive_failures = 0
-        max_consecutive_failures = 5
         
         # Main execution loop
         while not shutdown_event.is_set():
@@ -465,16 +464,13 @@ def main():
                 # Normal shutdown
                 break
             else:
-                # Failure
+                # Failure - retry forever with exponential backoff
                 consecutive_failures += 1
-                logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
+                logger.error(f"LightScope core failed (attempt {consecutive_failures})")
+                logger.info("Will retry indefinitely until successful or shutdown requested")
                 
-                if consecutive_failures >= max_consecutive_failures:
-                    logger.error("Too many consecutive failures, exiting...")
-                    sys.exit(1)
-                
-                # Wait before retry with exponential backoff
-                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 60)
+                # Wait before retry with exponential backoff (max 5 minutes)
+                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 300)
                 logger.info(f"Retrying in {sleep_time} seconds...")
                 
                 for _ in range(sleep_time):

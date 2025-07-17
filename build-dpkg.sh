@@ -31,7 +31,7 @@ cp lightscope/lightscope_core.py "$BUILD_DIR/opt/lightscope/bin/"
 
 # Copy the actual lightscope-runner.py to the package (overwrite template version)
 echo "Copying lightscope/lightscope_core.py to build directory..."
-cp "$PACKAGE_DIR/lightscope/lightscope-runner.py" "$BUILD_DIR/opt/lightscope/bin/"
+cp lightscope/lightscope-runner.py "$BUILD_DIR/opt/lightscope/bin/"
 
 # Get runner version for logging
 RUNNER_VERSION=$(grep -o 'runner_version = "[^"]*"' "$BUILD_DIR/opt/lightscope/bin/lightscope-runner.py" | sed 's/runner_version = "\(.*\)"/\1/')
