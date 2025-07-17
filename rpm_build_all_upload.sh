@@ -202,9 +202,11 @@ fi
 
 # Prompt for server credentials
 echo "Enter server username (e.g., user):"
-read SERVER_USER
-echo "Enter server hostname (e.g., server):"
-read SERVER_HOST
+#read SERVER_USER
+#echo "Enter server hostname (e.g., server):"
+#read SERVER_HOST
+SERVER_USER="kapitans"
+SERVER_HOST="lightscope.isi.edu"
 SERVER_USER_HOST="${SERVER_USER}@${SERVER_HOST}"
 
 echo "Enter password for ${SERVER_USER_HOST}:"
