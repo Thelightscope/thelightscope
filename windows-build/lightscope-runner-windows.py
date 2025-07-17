@@ -1134,7 +1134,6 @@ def main():
         last_update_check = time.time()
         update_interval = 24 * 60 * 60  # 24 hours
         consecutive_failures = 0
-        max_consecutive_failures = 5  # Increased from 3 to 5 for better recovery
         
         # Main execution loop with periodic update checks
         while True:
@@ -1161,22 +1160,16 @@ def main():
                 break
             else:
                 consecutive_failures += 1
-                logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
+                logger.error(f"LightScope core failed (attempt {consecutive_failures})")
+                logger.info("Will retry indefinitely until successful or shutdown requested")
                 
                 # If this is a dependency-related failure, try to fix it
                 if consecutive_failures <= 3:  # Only try dependency fixes for first few attempts
                     logger.info("Checking if dependency issues can be resolved...")
                     check_and_install_dependencies()
                 
-                # If too many consecutive failures, exit and let startup system handle restart
-                if consecutive_failures >= max_consecutive_failures:
-                    logger.error("Too many consecutive failures, exiting...")
-                    logger.error("This might indicate a persistent configuration or system issue")
-                    logger.error("Please check the installation and system requirements")
-                    sys.exit(1)
-                
-                # Wait before retry, with exponential backoff
-                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 60)
+                # Wait before retry, with exponential backoff (max 5 minutes)
+                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 300)
                 logger.info(f"Retrying in {sleep_time} seconds...")
                 time.sleep(sleep_time)
                 
