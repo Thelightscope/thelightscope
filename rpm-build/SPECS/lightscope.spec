@@ -15,9 +15,6 @@ BuildArch:      noarch
 BuildRequires:  python3-devel
 BuildRequires:  pkgconfig
 BuildRequires:  gcc
-BuildRequires:  openssl-devel
-BuildRequires:  libffi-devel
-BuildRequires:  rust
 
 
 # Runtime requirements
@@ -165,13 +162,12 @@ chmod +x %{buildroot}/usr/bin/lightscope
 
 # 1) Create the virtual environment
 print_status "🐍 Creating Python venv at /opt/lightscope/venv…"
-python3 -m venv /opt/lightscope/venv || echo "⚠️  Could not create venv"
+python3 -m venv --system-site-packages /opt/lightscope/venv    || echo "⚠️  Could not create venv"
 
 # 2) Install your modules into it
 print_status "📦 Installing Python packages into venv…"
 /opt/lightscope/venv/bin/pip install --upgrade pip \
-    cryptography \
-    cffi \
+
     dpkt \
     psutil \
     requests \
