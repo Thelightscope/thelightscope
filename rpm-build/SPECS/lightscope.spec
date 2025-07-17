@@ -159,9 +159,6 @@ chmod +x %{buildroot}/usr/bin/lightscope
 
 %post
 
-
-
-%post
 # Send all output to stderr & enable tracing
 exec 1>&2
 set -x
