@@ -26,6 +26,7 @@ Requires:       python3-cffi
 Requires:       python3-pip
 Requires:       python3-devel
 Requires:       gcc
+Requires:       libpcap-devel
 
 
 
@@ -38,18 +39,14 @@ findings to the LightScope cloud platform.
 %pre
 #To watch installation status:   journalctl -t lightscope-install -f
 
-logger -t lightscope-install "pre section"
-
-
-dnf install -y dnf-plugins-core
-logger -t lightscope-install "dnf install -y dnf-plugins-core"
-dnf config-manager --set-enabled crb
-logger -t lightscope-install "dnf config-manager --set-enabled crb"
-
-logger -t lightscope-install "about to install dnf install -y libpcap-devel"
-
-dnf install -y libpcap-devel
-logger -t lightscope-install "dnf install -y libpcap-devel done"
+#logger -t lightscope-install "pre section"
+#dnf install -y dnf-plugins-core
+#logger -t lightscope-install "dnf install -y dnf-plugins-core"
+#dnf config-manager --set-enabled crb
+#logger -t lightscope-install "dnf config-manager --set-enabled crb"
+#logger -t lightscope-install "about to install dnf install -y libpcap-devel"
+#dnf install -y libpcap-devel
+#logger -t lightscope-install "dnf install -y libpcap-devel done"
 
 
 
