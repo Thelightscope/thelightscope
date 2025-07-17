@@ -34,6 +34,17 @@ detects unwanted network traffic and provides honeypot capabilities.
 It monitors network interfaces for suspicious activity and reports
 findings to the LightScope cloud platform.
 
+%pre
+# Enable CRB so libpcap‑devel and python3‑pip are available
+if ! rpm -q libpcap-devel >/dev/null 2>&1; then
+    dnf install -y dnf-plugins-core \
+      && dnf config-manager --set-enabled crb \
+      && dnf clean metadata
+fi
+
+
+
+
 %prep
 # No prep needed for single file
 
