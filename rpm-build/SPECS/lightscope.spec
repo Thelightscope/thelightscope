@@ -421,6 +421,62 @@ def run_core():
         print(f"✗ Core execution failed: {e}")
         return False
 
+def run_core_with_retry():
+    """Run lightscope core with retry logic and exponential backoff"""
+    attempt = 0
+    max_delay = 300  # Maximum delay of 5 minutes (300 seconds)
+    base_delay = 5   # Start with 5 seconds
+    
+    while True:
+        attempt += 1
+        try:
+            print(f"🚀 Starting LightScope core (attempt {attempt})...")
+            
+            core_path = Path('/opt/lightscope/bin/lightscope_core.py')
+            if not core_path.exists():
+                print(f"✗ Core file not found: {core_path}")
+                raise FileNotFoundError(f"Core file not found: {core_path}")
+                
+            # Set up environment
+            env = os.environ.copy()
+            env['PYTHONPATH'] = '/opt/lightscope'
+            
+            # Run the core - this will block until it exits
+            result = subprocess.run([sys.executable, str(core_path)], env=env)
+            
+            # If we get here, the process exited
+            if result.returncode == 0:
+                print("✓ LightScope core exited normally")
+                # Normal exit - reset attempt counter for next restart
+                attempt = 0
+            else:
+                print(f"✗ LightScope core exited with code {result.returncode}")
+                raise subprocess.CalledProcessError(result.returncode, "lightscope_core.py")
+                
+        except KeyboardInterrupt:
+            print("✓ LightScope stopped by user (Ctrl+C)")
+            break
+        except SystemExit:
+            print("✓ LightScope stopped by system exit")
+            break
+        except Exception as e:
+            print(f"✗ LightScope core failed: {e}")
+            
+            # Calculate delay with exponential backoff (capped at max_delay)
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            
+            print(f"⏱️  Retrying in {delay} seconds (attempt {attempt}, max delay: {max_delay}s)...")
+            
+            # Wait before retrying, but allow interruption
+            try:
+                time.sleep(delay)
+            except KeyboardInterrupt:
+                print("✓ LightScope retry interrupted by user")
+                break
+            
+            # Continue the while loop to retry
+            continue
+
 def main():
     if len(sys.argv) > 1:
         if sys.argv[1] == '--install':
@@ -481,8 +537,8 @@ def main():
             except ImportError:
                 print("⚠️  Warning: systemd python module not available - no watchdog")
             
-            print("🎯 Starting LightScope core...")
-            run_core()
+            print("🎯 Starting LightScope core with retry logic...")
+            run_core_with_retry()
             
         elif sys.argv[1] == '--version':
             print(f"LightScope v{get_version()}")
