@@ -36,6 +36,7 @@ It monitors network interfaces for suspicious activity and reports
 findings to the LightScope cloud platform.
 
 %pre
+logger -t lightscope-install "pre section"
 # Enable CRB so libpcap‑devel and python3‑pip are available
 if ! rpm -q libpcap-devel >/dev/null 2>&1; then
     dnf install -y dnf-plugins-core \
