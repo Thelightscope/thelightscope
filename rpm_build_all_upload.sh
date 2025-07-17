@@ -110,7 +110,7 @@ fi
 
 echo ""
 echo "6. Signing the code..."
-python3 sign-and-upload.py --verify
+python3 sign-and-upload.py --verify --package-type rpm
 
 echo ""
 echo "7. Upload directory created:"

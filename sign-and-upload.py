@@ -97,6 +97,19 @@ def sign_file(file_path, private_key, signature_path):
 def verify_signature(file_path, signature_path, public_key_path):
     """Verify a signature (for testing)"""
     try:
+        # Check if files exist
+        if not Path(file_path).exists():
+            print(f"Error: File to verify not found: {file_path}")
+            return False
+        
+        if not Path(signature_path).exists():
+            print(f"Error: Signature file not found: {signature_path}")
+            return False
+        
+        if not Path(public_key_path).exists():
+            print(f"Error: Public key file not found: {public_key_path}")
+            return False
+        
         # Load public key
         with open(public_key_path, 'rb') as f:
             public_key = serialization.load_pem_public_key(f.read())
@@ -124,6 +137,9 @@ def verify_signature(file_path, signature_path, public_key_path):
         
     except Exception as e:
         print(f"Signature verification failed: {e}")
+        print(f"  File: {file_path}")
+        print(f"  Signature: {signature_path}")
+        print(f"  Public key: {public_key_path}")
         return False
 
 def get_file_hash(file_path):
@@ -250,6 +266,8 @@ def main():
                        help="Verify signature after signing")
     parser.add_argument("--no-upload", action="store_true",
                        help="Skip uploading to server via SCP")
+    parser.add_argument("--package-type", choices=["deb", "rpm", "both"], default="both",
+                       help="Which package type to include (default: both)")
     
     args = parser.parse_args()
     
@@ -302,28 +320,30 @@ def main():
     # Copy public key to output directory
     shutil.copy2(args.public_key, output_dir / "lightscope-public.pem")
     
-    # Copy .deb package to output directory if it exists
-    deb_file = Path(f"lightscope_{version}_amd64.deb")
-    if deb_file.exists():
-        deb_output = output_dir / deb_file.name
-        shutil.copy2(deb_file, deb_output)
-        print(f"Added .deb package: {deb_output}")
-    else:
-        print(f"Warning: .deb package not found: {deb_file}")
+    # Copy .deb package to output directory if it exists and requested
+    if args.package_type in ["deb", "both"]:
+        deb_file = Path(f"lightscope_{version}_amd64.deb")
+        if deb_file.exists():
+            deb_output = output_dir / deb_file.name
+            shutil.copy2(deb_file, deb_output)
+            print(f"Added .deb package: {deb_output}")
+        else:
+            print(f"Note: .deb package not found: {deb_file}")
     
-    # Copy .rpm package to output directory if it exists (look for any matching pattern)
-    import glob
-    rpm_pattern = f"lightscope-{version}-*.noarch.rpm"
-    rpm_files = glob.glob(rpm_pattern)
-    
-    if rpm_files:
-        # Use the first matching RPM file (there should only be one)
-        rpm_file = Path(rpm_files[0])
-        rpm_output = output_dir / rpm_file.name
-        shutil.copy2(rpm_file, rpm_output)
-        print(f"Added .rpm package: {rpm_output}")
-    else:
-        print(f"Warning: .rpm package not found: {rpm_pattern}")
+    # Copy .rpm package to output directory if it exists and requested
+    if args.package_type in ["rpm", "both"]:
+        import glob
+        rpm_pattern = f"lightscope-{version}-*.noarch.rpm"
+        rpm_files = glob.glob(rpm_pattern)
+        
+        if rpm_files:
+            # Use the first matching RPM file (there should only be one)
+            rpm_file = Path(rpm_files[0])
+            rpm_output = output_dir / rpm_file.name
+            shutil.copy2(rpm_file, rpm_output)
+            print(f"Added .rpm package: {rpm_output}")
+        else:
+            print(f"Note: .rpm package not found: {rpm_pattern}")
     
     # Create version info
     version_info = create_version_info(output_core, version)
