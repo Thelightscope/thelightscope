@@ -166,6 +166,8 @@ python3 -m venv /opt/lightscope/venv || echo "⚠️  Could not create venv"
 # 2) Install your modules into it
 print_status "📦 Installing Python packages into venv…"
 /opt/lightscope/venv/bin/pip install --upgrade pip \
+    cryptography \
+    cffi \
     dpkt \
     psutil \
     requests \
