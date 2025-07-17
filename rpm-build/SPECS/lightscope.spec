@@ -297,23 +297,32 @@ fi
 
 if [ ! -z "$PKG_MGR" ]; then
     # Install essential packages for LightScope with SHORT timeouts
-    PACKAGES="libpcap-devel python3-devel python3-pip pkgconfig gcc python3-cryptography"
+    # Note: libpcap-devel might be called libpcap-devel or libpcap-dev depending on distribution
+    PACKAGES="python3-devel python3-pip pkgconfig gcc python3-cryptography"
     print_status "📦 Installing: $PACKAGES"
     
-    # Install packages with SHORT timeout (60 seconds max)
-    print_status "⏱️  Installing packages (60 second timeout)..."
-    if timeout 60 $PKG_MGR install -y $PACKAGES; then
+    # Check for and kill any hanging DNF processes to avoid locks
+    print_status "🔍 Checking for DNF lock conflicts..."
+    if pgrep -x "dnf\|yum" > /dev/null; then
+        print_status "⚠️  Found running DNF/YUM processes, waiting for them to finish..."
+        # Wait up to 30 seconds for other package managers to finish
+        timeout 30 bash -c 'while pgrep -x "dnf\|yum" > /dev/null; do sleep 1; done' || true
+    fi
+    
+    # Install packages with SHORT timeout (90 seconds max, increased due to DNF lock issues)
+    print_status "⏱️  Installing packages (90 second timeout)..."
+    if timeout 90 $PKG_MGR install -y $PACKAGES; then
         print_status "✅ System packages installed successfully"
     else
         print_status "⚠️  Package installation failed or timed out"
         print_status "💡 You may need to install manually later: $PACKAGES"
         print_status "💡 Command to run: sudo $PKG_MGR install -y $PACKAGES"
         
-        # Try to install critical packages individually with SHORT timeout
-        print_status "🔧 Trying to install critical packages individually (30s each)..."
+        # Try to install critical packages individually with longer timeout
+        print_status "🔧 Trying to install critical packages individually (60s each)..."
         for pkg in python3-pip python3-devel python3-cryptography; do
             print_status "Installing $pkg..."
-            if timeout 30 $PKG_MGR install -y $pkg; then
+            if timeout 60 $PKG_MGR install -y $pkg; then
                 print_status "✅ Successfully installed: $pkg"
             else
                 print_status "⚠️  Failed to install: $pkg"
@@ -321,13 +330,48 @@ if [ ! -z "$PKG_MGR" ]; then
         done
     fi
     
-    # Verify pip installation
+    # Try to install libpcap development package (name varies by distribution)
+    print_status "🔍 Trying to install libpcap development package..."
+    for libpcap_pkg in libpcap-devel libpcap-dev; do
+        print_status "Trying $libpcap_pkg..."
+        if timeout 30 $PKG_MGR install -y $libpcap_pkg; then
+            print_status "✅ Successfully installed: $libpcap_pkg"
+            break
+        else
+            print_status "⚠️  $libpcap_pkg not found or failed to install"
+        fi
+    done
+    
+    # Verify and fix pip installation
     print_status "🔍 Verifying pip installation..."
     if python3 -m pip --version; then
         print_status "✅ pip is working correctly"
     else
         print_status "⚠️  pip not available via python3 -m pip"
-        print_status "💡 pip should have been installed with python3-pip package"
+        print_status "🔧 Attempting to fix pip installation..."
+        
+        # Try different methods to get pip working
+        if python3 -m ensurepip --upgrade; then
+            print_status "✅ pip installed via ensurepip"
+        else
+            print_status "⚠️  ensurepip failed, trying alternative methods..."
+            
+            # Try to reinstall python3-pip
+            print_status "🔄 Reinstalling python3-pip..."
+            if timeout 60 $PKG_MGR reinstall -y python3-pip; then
+                print_status "✅ python3-pip reinstalled"
+            else
+                print_status "⚠️  python3-pip reinstall failed"
+            fi
+        fi
+        
+        # Final verification
+        if python3 -m pip --version; then
+            print_status "✅ pip is now working correctly"
+        else
+            print_status "⚠️  pip still not working - manual intervention may be needed"
+            print_status "💡 Try: sudo dnf reinstall python3-pip"
+        fi
     fi
 else
     print_status "⚠️  Cannot install system packages automatically"
@@ -353,8 +397,8 @@ fi
 
 # Start the service with SHORT timeout to avoid hanging
 print_status "🚀 Starting LightScope service..."
-print_status "⏱️  Using 90 second timeout for service start..."
-if timeout 90 systemctl start lightscope; then
+print_status "⏱️  Using 120 second timeout for service start..."
+if timeout 120 systemctl start lightscope; then
     print_status "✅ LightScope service started successfully"
     print_status "📋 Service is running and monitoring network traffic"
     
@@ -369,7 +413,7 @@ if timeout 90 systemctl start lightscope; then
         print_status "⚠️  Service may be initializing - check with: systemctl status lightscope"
     fi
 else
-    print_status "⚠️  Service start failed or timed out (90 seconds)"
+    print_status "⚠️  Service start failed or timed out (120 seconds)"
     print_status "💡 You can start it manually later with: sudo systemctl start lightscope"
     print_status "💡 Monitor startup with: sudo journalctl -fu lightscope"
 fi
