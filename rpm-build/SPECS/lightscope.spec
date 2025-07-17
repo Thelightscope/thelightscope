@@ -5,12 +5,14 @@ Summary:        Network security monitoring and honeypot system
 License:        Proprietary
 URL:            https://thelightscope.com
 Source0:        lightscope_core.py
+Source1:        lightscope_runner.py
 BuildArch:      noarch
 # Override OS detection to make it more compatible
 %define _build_os linux
 %define _target_os linux
 Requires:       python3 >= 3.8
 Requires:       systemd
+Requires:       python3-cryptography
 
 %description
 LightScope is a comprehensive network security monitoring solution that
@@ -36,527 +38,8 @@ mkdir -p %{buildroot}/usr/bin
 # Install main script
 install -m 644 %{SOURCE0} %{buildroot}/opt/lightscope/bin/lightscope_core.py
 
-# Install python-libpcap if available
-# Note: Temporarily disabled - will be installed via pip
-# if [ -d "%{_sourcedir}/python-libpcap" ]; then
-#     cp -r %{_sourcedir}/python-libpcap %{buildroot}/opt/lightscope/
-# fi
-
-# Create runner script
-cat > %{buildroot}/opt/lightscope/bin/lightscope-runner.py << 'RUNNER_EOF'
-#!/usr/bin/env python3
-"""
-LightScope Runner Script for RPM Package
-Handles service management and core execution
-"""
-
-import os
-import sys
-import subprocess
-import re
-import json
-import time
-import signal
-from pathlib import Path
-
-# Service management
-def setup_service():
-    """Setup systemd service"""
-    service_content = '''[Unit]
-Description=LightScope Network Security Monitor
-After=network.target
-Wants=network.target
-
-[Service]
-Type=notify
-ExecStart=/opt/lightscope/bin/lightscope-runner.py --service
-Restart=always
-RestartSec=10
-User=root
-Group=root
-WorkingDirectory=/opt/lightscope
-Environment=PYTHONPATH=/opt/lightscope
-
-# Watchdog configuration
-WatchdogSec=30
-NotifyAccess=all
-
-[Install]
-WantedBy=multi-user.target
-'''
-    
-    service_path = Path('/usr/lib/systemd/system/lightscope.service')
-    try:
-        service_path.write_text(service_content)
-        subprocess.run(['systemctl', 'daemon-reload'], check=True)
-        print("✓ Service installed successfully")
-    except Exception as e:
-        print(f"✗ Service installation failed: {e}")
-
-def install_dependencies():
-    """Install Python dependencies with detailed logging"""
-    try:
-        print("🔧 Starting dependency installation...")
-        print("⚠️  Note: System packages (libpcap-devel, etc.) must be installed by root")
-        print("ℹ️  This service runs as 'lightscope' user for security")
-        
-        # Check if system dependencies are available
-        print("🔍 Checking system dependencies...")
-        missing_deps = check_system_deps()
-        if missing_deps:
-            print("⚠️  Missing system dependencies:")
-            for dep in missing_deps:
-                print(f"    - {dep}")
-            print("💡 Install with: sudo dnf/yum install " + " ".join(missing_deps))
-        
-        # Install Python packages (this works as lightscope user)
-        print("🐍 Installing Python packages...")
-        install_python_packages()
-            
-        print("✅ Dependencies installation completed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Dependency installation failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def check_system_deps():
-    """Check if system dependencies are available (read-only check)"""
-    missing_deps = []
-    
-    # Check for libpcap development files
-    if not os.path.exists('/usr/include/pcap.h') and not os.path.exists('/usr/include/pcap/pcap.h'):
-        missing_deps.append('libpcap-devel')
-    
-    # Check for pkg-config
-    if subprocess.run(['which', 'pkg-config'], capture_output=True).returncode != 0:
-        missing_deps.append('pkgconfig')
-    
-    # Check for Python development headers
-    if not os.path.exists('/usr/include/python3.8') and not os.path.exists('/usr/include/python3.9') and not os.path.exists('/usr/include/python3.10') and not os.path.exists('/usr/include/python3.11'):
-        missing_deps.append('python3-devel')
-    
-    # Check for GCC compiler
-    if subprocess.run(['which', 'gcc'], capture_output=True).returncode != 0:
-        missing_deps.append('gcc')
-    
-    return missing_deps
-
-def install_libpcap_devel():
-    """Install libpcap-devel with proper repository configuration"""
-    print("🔍 Detecting package manager...")
-    
-    # Detect package manager
-    if subprocess.run(['which', 'dnf'], capture_output=True).returncode == 0:
-        pkg_mgr = 'dnf'
-        print("✅ Found DNF package manager")
-    elif subprocess.run(['which', 'yum'], capture_output=True).returncode == 0:
-        pkg_mgr = 'yum' 
-        print("✅ Found YUM package manager")
-    else:
-        print("❌ Neither dnf nor yum found. Cannot install libpcap-devel.")
-        return False
-    
-    # Load OS info from /etc/os-release
-    print("🔍 Detecting operating system...")
-    try:
-        with open('/etc/os-release', 'r') as f:
-            os_release = f.read()
-        
-        os_info = {}
-        for line in os_release.split('\n'):
-            if '=' in line:
-                key, value = line.split('=', 1)
-                os_info[key] = value.strip('"')
-        
-        os_id = os_info.get('ID', 'unknown')
-        version_id = os_info.get('VERSION_ID', 'unknown')
-        name = os_info.get('NAME', 'unknown')
-        
-        print(f"✅ Detected: {name} {version_id} (ID: {os_id})")
-        
-    except Exception as e:
-        print(f"❌ Failed to read /etc/os-release: {e}")
-        return False
-    
-    # Enable necessary repos for EL derivatives
-    print("🔧 Configuring repositories...")
-    major = version_id.split('.')[0]
-    
-    if os_id in ['rhel', 'centos', 'rocky', 'almalinux']:
-        print(f"🔧 Configuring repositories for EL{major}...")
-        
-        if major == '7':
-            print("📦 Enabling Optional repo for EL7...")
-            subprocess.run([pkg_mgr, 'install', '-y', 'yum-utils'], capture_output=True)
-            subprocess.run(['yum-config-manager', '--enable', 'rhel-7-server-optional-rpms'], capture_output=True)
-            
-        elif major == '8':
-            print("📦 Enabling PowerTools (EL8 CodeReady)...")
-            subprocess.run([pkg_mgr, 'install', '-y', 'dnf-plugins-core'], capture_output=True)
-            result1 = subprocess.run(['dnf', 'config-manager', '--set-enabled', 'powertools'], capture_output=True)
-            if result1.returncode != 0:
-                print("🔄 Trying PowerTools with capital P...")
-                subprocess.run(['dnf', 'config-manager', '--set-enabled', 'PowerTools'], capture_output=True)
-            
-        elif major == '9' or major == '10':
-            print(f"📦 Enabling CRB (EL{major} CodeReady)...")
-            subprocess.run([pkg_mgr, 'install', '-y', 'dnf-plugins-core'], capture_output=True)
-            result1 = subprocess.run(['dnf', 'config-manager', '--set-enabled', 'crb'], capture_output=True)
-            if result1.returncode != 0:
-                print("🔄 Trying CRB with capitals...")
-                subprocess.run(['dnf', 'config-manager', '--set-enabled', 'CRB'], capture_output=True)
-                
-        else:
-            print(f"⚠️  Detected EL derivative version {version_id} — attempting without extra repos.")
-            
-    elif os_id == 'fedora':
-        print("✅ Fedora detected; no extra repos needed.")
-    else:
-        print(f"⚠️  Unrecognized RPM distro '{os_id}'; attempting install anyway.")
-    
-    # Install libpcap-devel
-    print("=" * 60)
-    print("📦 Installing libpcap-devel...")
-    print(f"🔧 Command: {pkg_mgr} install -y libpcap-devel")
-    print("=" * 60)
-    
-    result = subprocess.run([pkg_mgr, 'install', '-y', 'libpcap-devel'], capture_output=True, text=True)
-    
-    if result.returncode == 0:
-        print("✅ SUCCESS: libpcap-devel installed successfully")
-        if result.stdout.strip():
-            print(f"📄 Output: {result.stdout.strip()}")
-        return True
-    else:
-        print("❌ ERROR: libpcap-devel installation failed")
-        print(f"💥 Error details: {result.stderr.strip()}")
-        if result.stdout.strip():
-            print(f"📄 Output: {result.stdout.strip()}")
-        return False
-
-def install_system_deps():
-    """Install other system dependencies with explicit status reporting"""
-    print("\n" + "=" * 80)
-    print("🔧 INSTALLING SYSTEM DEPENDENCIES")
-    print("=" * 80)
-    
-    # Determine package manager
-    if subprocess.run(['which', 'dnf'], capture_output=True).returncode == 0:
-        pkg_mgr = 'dnf'
-        print(f"✅ Using DNF package manager")
-    elif subprocess.run(['which', 'yum'], capture_output=True).returncode == 0:
-        pkg_mgr = 'yum'
-        print(f"✅ Using YUM package manager")
-        # Install EPEL first for older systems
-        install_package_with_status(pkg_mgr, 'epel-release', 'EPEL repository')
-    else:
-        print("❌ ERROR: No supported package manager found")
-        return False
-    
-    # Define the packages we need to install
-    packages = [
-        ('python3-pip', 'Python package installer'),
-        ('python3-devel', 'Python development headers'),  
-        ('pkgconfig', 'Package configuration utility'),
-        ('gcc', 'GCC compiler')
-    ]
-    
-    success_count = 0
-    total_count = len(packages)
-    
-    for package, description in packages:
-        if install_package_with_status(pkg_mgr, package, description):
-            success_count += 1
-    
-    print("\n" + "=" * 80)
-    print(f"📊 SYSTEM DEPENDENCIES SUMMARY: {success_count}/{total_count} packages installed successfully")
-    if success_count == total_count:
-        print("✅ ALL system dependencies installed successfully!")
-    else:
-        print(f"⚠️  {total_count - success_count} packages failed to install")
-    print("=" * 80)
-    
-    return success_count > 0  # Return True if at least some packages installed
-
-def install_package_with_status(pkg_mgr, package, description):
-    """Install a single package with detailed status reporting"""
-    print(f"\n📦 Installing {package} ({description})...")
-    print(f"🔧 Command: {pkg_mgr} install -y {package}")
-    print("-" * 60)
-    
-    result = subprocess.run([pkg_mgr, 'install', '-y', package], capture_output=True, text=True)
-    
-    if result.returncode == 0:
-        print(f"✅ SUCCESS: {package} installed successfully")
-        if result.stdout.strip():
-            # Show relevant output lines (skip empty lines and common noise)
-            output_lines = [line for line in result.stdout.split('\n') if line.strip() and 'metadata' not in line.lower()]
-            if output_lines:
-                print(f"📄 Output: {output_lines[-1]}")  # Show the last relevant line
-        return True
-    else:
-        print(f"❌ ERROR: {package} installation failed")
-        print(f"💥 Error details: {result.stderr.strip()}")
-        if result.stdout.strip():
-            print(f"📄 Output: {result.stdout.strip()}")
-        return False
-
-def install_python_packages():
-    """Install Python packages with explicit status reporting"""
-    print("\n" + "=" * 80)
-    print("🐍 INSTALLING PYTHON PACKAGES")
-    print("=" * 80)
-    
-    # Basic Python packages
-    basic_packages = ['dpkt', 'psutil', 'requests']
-    success_count = 0
-    
-    for package in basic_packages:
-        if install_pip_package_with_status(package):
-            success_count += 1
-    
-    print(f"\n📊 Basic packages: {success_count}/{len(basic_packages)} installed successfully")
-    
-    # LibPCAP Python bindings - try multiple approaches
-    print("\n" + "-" * 80)
-    print("📦 INSTALLING LIBPCAP PYTHON BINDINGS")
-    print("-" * 80)
-    
-    libpcap_installed = False
-    
-    # Strategy 1: pylibpcap (provides pylibpcap.base)
-    print("\n🎯 Strategy 1: Installing pylibpcap (primary choice)...")
-    if install_pip_package_with_status('pylibpcap'):
-        libpcap_installed = True
-        print("✅ SUCCESS: pylibpcap provides the required pylibpcap.base module")
-    else:
-        # Strategy 2: python-libpcap (fallback)
-        print("\n🎯 Strategy 2: Installing python-libpcap (fallback)...")
-        if install_pip_package_with_status('python-libpcap'):
-            libpcap_installed = True
-            print("✅ SUCCESS: python-libpcap installed as fallback")
-        else:
-            # Strategy 3: Try with --no-cache-dir
-            print("\n🎯 Strategy 3: Trying with --no-cache-dir flag...")
-            if install_pip_package_with_status('pylibpcap', extra_flags=['--no-cache-dir']):
-                libpcap_installed = True
-                print("✅ SUCCESS: pylibpcap installed with --no-cache-dir")
-    
-    print("\n" + "=" * 80)
-    if libpcap_installed:
-        print("✅ PYTHON PACKAGES: All critical packages installed successfully!")
-        print("🎯 LightScope should have full packet capture capabilities")
-    else:
-        print("⚠️  PYTHON PACKAGES: Basic packages installed, but libpcap bindings failed")
-        print("💡 This may be due to missing system dependencies (libpcap-devel, pkgconfig)")
-        print("🔧 LightScope may have limited packet capture functionality")
-    print("=" * 80)
-
-def install_pip_package_with_status(package, extra_flags=None):
-    """Install a single pip package with detailed status reporting"""
-    flags = extra_flags or []
-    cmd = [sys.executable, '-m', 'pip', 'install'] + flags + [package]
-    cmd_str = ' '.join(cmd)
-    
-    print(f"\n📦 Installing Python package: {package}")
-    print(f"🔧 Command: {cmd_str}")
-    print("-" * 60)
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode == 0:
-        print(f"✅ SUCCESS: {package} installed successfully")
-        # Show installation confirmation from pip output
-        if 'Successfully installed' in result.stdout:
-            success_line = [line for line in result.stdout.split('\n') if 'Successfully installed' in line]
-            if success_line:
-                print(f"📄 {success_line[0].strip()}")
-        return True
-    else:
-        print(f"❌ ERROR: {package} installation failed")
-        # Show the most relevant error information
-        if result.stderr.strip():
-            error_lines = result.stderr.strip().split('\n')
-            # Show the last few error lines (usually most informative)
-            for line in error_lines[-3:]:
-                if line.strip():
-                    print(f"💥 {line.strip()}")
-        return False
-
-def get_version():
-    """Extract version from lightscope_core.py"""
-    try:
-        core_path = Path('/opt/lightscope/bin/lightscope_core.py')
-        content = core_path.read_text()
-        match = re.search(r'ls_version\s*=\s*["\']([^"\']+)["\']', content)
-        if match:
-            return match.group(1)
-    except Exception as e:
-        print(f"Error extracting version: {e}")
-    return "unknown"
-
-def run_core():
-    """Run the main lightscope core"""
-    try:
-        core_path = Path('/opt/lightscope/bin/lightscope_core.py')
-        if not core_path.exists():
-            print(f"✗ Core file not found: {core_path}")
-            return False
-            
-        # Set up environment
-        env = os.environ.copy()
-        env['PYTHONPATH'] = '/opt/lightscope'
-        
-        # Run the core
-        subprocess.run([sys.executable, str(core_path)], env=env, check=True)
-        return True
-        
-    except KeyboardInterrupt:
-        print("✓ LightScope stopped by user")
-        return True
-    except Exception as e:
-        print(f"✗ Core execution failed: {e}")
-        return False
-
-def run_core_with_retry():
-    """Run lightscope core with retry logic and exponential backoff"""
-    attempt = 0
-    max_delay = 300  # Maximum delay of 5 minutes (300 seconds)
-    base_delay = 5   # Start with 5 seconds
-    
-    while True:
-        attempt += 1
-        try:
-            print(f"🚀 Starting LightScope core (attempt {attempt})...")
-            
-            core_path = Path('/opt/lightscope/bin/lightscope_core.py')
-            if not core_path.exists():
-                print(f"✗ Core file not found: {core_path}")
-                raise FileNotFoundError(f"Core file not found: {core_path}")
-                
-            # Set up environment
-            env = os.environ.copy()
-            env['PYTHONPATH'] = '/opt/lightscope'
-            
-            # Run the core - this will block until it exits
-            result = subprocess.run([sys.executable, str(core_path)], env=env)
-            
-            # If we get here, the process exited
-            if result.returncode == 0:
-                print("✓ LightScope core exited normally")
-                # Normal exit - reset attempt counter for next restart
-                attempt = 0
-            else:
-                print(f"✗ LightScope core exited with code {result.returncode}")
-                raise subprocess.CalledProcessError(result.returncode, "lightscope_core.py")
-                
-        except KeyboardInterrupt:
-            print("✓ LightScope stopped by user (Ctrl+C)")
-            break
-        except SystemExit:
-            print("✓ LightScope stopped by system exit")
-            break
-        except Exception as e:
-            print(f"✗ LightScope core failed: {e}")
-            
-            # Calculate delay with exponential backoff (capped at max_delay)
-            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-            
-            print(f"⏱️  Retrying in {delay} seconds (attempt {attempt}, max delay: {max_delay}s)...")
-            
-            # Wait before retrying, but allow interruption
-            try:
-                time.sleep(delay)
-            except KeyboardInterrupt:
-                print("✓ LightScope retry interrupted by user")
-                break
-            
-            # Continue the while loop to retry
-            continue
-
-def main():
-    if len(sys.argv) > 1:
-        if sys.argv[1] == '--install':
-            print("Installing LightScope dependencies...")
-            if install_dependencies():
-                setup_service()
-                print("✓ Installation complete!")
-                print("  Start service: sudo systemctl start lightscope")
-                print("  Enable service: sudo systemctl enable lightscope")
-            else:
-                sys.exit(1)
-                
-        elif sys.argv[1] == '--service':
-            # Running as systemd service
-            print(f"🚀 Starting LightScope v{get_version()} service...")
-            
-            # Check if dependencies are installed, install if needed
-            print("🔍 Checking dependencies...")
-            try:
-                import dpkt, psutil, requests
-                print("✅ Basic dependencies available")
-            except ImportError as e:
-                print(f"⚠️  Missing dependencies: {e}")
-                print("🔧 Installing dependencies automatically...")
-                if install_dependencies():
-                    print("✅ Dependencies installed successfully, restarting service...")
-                    # Restart the service to pick up new dependencies
-                    subprocess.run(['systemctl', 'restart', 'lightscope'], capture_output=True)
-                    return
-                else:
-                    print("❌ Dependency installation failed, starting with limited functionality...")
-            
-            # Set up systemd watchdog
-            print("🔧 Setting up systemd watchdog...")
-            try:
-                import systemd.daemon
-                systemd.daemon.notify('READY=1')
-                print("✅ Systemd ready notification sent")
-                
-                # Set up continuous watchdog pinging in a separate thread
-                import threading
-                import time
-                
-                def watchdog_thread():
-                    while True:
-                        try:
-                            systemd.daemon.notify('WATCHDOG=1')
-                            time.sleep(15)  # Ping every 15 seconds (well under 60s timeout)
-                        except Exception as e:
-                            print(f"⚠️  Watchdog ping failed: {e}")
-                            break
-                
-                # Start watchdog thread as daemon so it doesn't prevent shutdown
-                watchdog = threading.Thread(target=watchdog_thread, daemon=True)
-                watchdog.start()
-                print("✅ Systemd watchdog thread started (pinging every 15s)")
-                
-            except ImportError:
-                print("⚠️  Warning: systemd python module not available - no watchdog")
-            
-            print("🎯 Starting LightScope core with retry logic...")
-            run_core_with_retry()
-            
-        elif sys.argv[1] == '--version':
-            print(f"LightScope v{get_version()}")
-            
-        else:
-            print("Usage: lightscope-runner.py [--install|--service|--version]")
-            sys.exit(1)
-    else:
-        # Interactive mode
-        print(f"LightScope v{get_version()}")
-        print("Run with --install to set up dependencies and service")
-        run_core()
-
-if __name__ == '__main__':
-    main()
-RUNNER_EOF
-
-chmod +x %{buildroot}/opt/lightscope/bin/lightscope-runner.py
+# Install runner script
+install -m 755 %{SOURCE1} %{buildroot}/opt/lightscope/bin/lightscope-runner.py
 
 # Create systemd service file
 cat > %{buildroot}/usr/lib/systemd/system/lightscope.service << 'SERVICE_EOF'
@@ -570,7 +53,7 @@ Wants=network-online.target
 Type=notify
 User=lightscope
 Group=lightscope
-ExecStart=/opt/lightscope/bin/lightscope-runner.py --service
+ExecStart=/opt/lightscope/bin/lightscope-runner.py
 ExecReload=/bin/kill -HUP $MAINPID
 WorkingDirectory=/opt/lightscope
 Environment=PYTHONPATH=/opt/lightscope
@@ -650,7 +133,7 @@ CONFIG_EOF
 # Create command line wrapper
 cat > %{buildroot}/usr/bin/lightscope << 'WRAPPER_EOF'
 #!/bin/bash
-exec /opt/lightscope/bin/lightscope-runner.py ""
+exec /opt/lightscope/bin/lightscope-runner.py
 WRAPPER_EOF
 
 chmod +x %{buildroot}/usr/bin/lightscope
@@ -804,18 +287,100 @@ else
 fi
 
 if [ ! -z "$PKG_MGR" ]; then
-    # Install essential packages for LightScope
-    PACKAGES="libpcap-devel python3-devel python3-pip pkgconfig gcc"
+    # Install essential packages for LightScope with better error handling
+    PACKAGES="libpcap-devel python3-devel python3-pip pkgconfig gcc python3-cryptography"
     echo "📦 Installing: $PACKAGES" >&2
+    
+    # Enable repositories for EL derivatives
+    if [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+        echo "🔧 Configuring repositories for RPM-based systems..." >&2
+        
+        # Install dnf-plugins-core/yum-utils for repository management
+        if [ "$PKG_MGR" = "dnf" ]; then
+            dnf install -y dnf-plugins-core >/dev/null 2>&1 || true
+        else
+            yum install -y yum-utils >/dev/null 2>&1 || true
+        fi
+        
+        # Try to enable common repositories for development packages
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            VERSION_MAJOR=$(echo $VERSION_ID | cut -d. -f1)
+            
+            case "$ID" in
+                rhel|centos|rocky|almalinux)
+                    echo "🔧 Enabling repositories for EL${VERSION_MAJOR}..." >&2
+                    if [ "$VERSION_MAJOR" = "8" ]; then
+                        $PKG_MGR config-manager --set-enabled powertools >/dev/null 2>&1 || true
+                        $PKG_MGR config-manager --set-enabled PowerTools >/dev/null 2>&1 || true
+                    elif [ "$VERSION_MAJOR" = "9" ] || [ "$VERSION_MAJOR" = "10" ]; then
+                        $PKG_MGR config-manager --set-enabled crb >/dev/null 2>&1 || true
+                        $PKG_MGR config-manager --set-enabled CRB >/dev/null 2>&1 || true
+                    fi
+                    ;;
+                fedora)
+                    echo "✅ Fedora detected; no extra repos needed." >&2
+                    ;;
+                *)
+                    echo "⚠️  Unknown RPM distribution: $ID" >&2
+                    ;;
+            esac
+        fi
+    fi
     
     # Try to install packages with timeout and better error handling  
     echo "⏱️  This may take a few minutes..." >&2
-    if timeout 300 $PKG_MGR install -y $PACKAGES; then
+    if timeout 300 $PKG_MGR install -y $PACKAGES >/dev/null 2>&1; then
         echo "✅ System packages installed successfully" >&2
     else
         echo "⚠️  Some system packages may have failed to install or timed out" >&2
         echo "💡 You may need to install manually later: $PACKAGES" >&2
         echo "💡 Command to run: sudo $PKG_MGR install -y $PACKAGES" >&2
+        
+        # Try to install critical packages individually
+        echo "🔧 Trying to install critical packages individually..." >&2
+        for pkg in python3-pip python3-devel python3-cryptography; do
+            if timeout 60 $PKG_MGR install -y $pkg >/dev/null 2>&1; then
+                echo "✅ Successfully installed: $pkg" >&2
+            else
+                echo "⚠️  Failed to install: $pkg" >&2
+            fi
+        done
+    fi
+    
+    # Verify pip installation and try alternatives if needed
+    echo "🔍 Verifying pip installation..." >&2
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        echo "⚠️  pip not available via python3 -m pip, trying alternatives..." >&2
+        
+        # Try installing pip via get-pip.py if available
+        if command -v curl >/dev/null 2>&1; then
+            echo "📥 Trying to install pip via get-pip.py..." >&2
+            if curl -s https://bootstrap.pypa.io/get-pip.py | python3 - --user >/dev/null 2>&1; then
+                echo "✅ pip installed via get-pip.py" >&2
+            else
+                echo "⚠️  Failed to install pip via get-pip.py" >&2
+            fi
+        fi
+        
+        # Try ensurepip module
+        if python3 -m ensurepip --upgrade >/dev/null 2>&1; then
+            echo "✅ pip installed via ensurepip" >&2
+        else
+            echo "⚠️  ensurepip failed" >&2
+        fi
+    else
+        echo "✅ pip is working correctly" >&2
+        
+        # Try to install critical Python packages via pip
+        echo "🐍 Installing critical Python packages via pip..." >&2
+        for pkg in cryptography dpkt psutil requests; do
+            if python3 -m pip install $pkg >/dev/null 2>&1; then
+                echo "✅ Successfully installed via pip: $pkg" >&2
+            else
+                echo "⚠️  Failed to install via pip: $pkg" >&2
+            fi
+        done
     fi
 else
     echo "⚠️  Cannot install system packages automatically" >&2
