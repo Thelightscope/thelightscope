@@ -158,21 +158,40 @@ chmod +x %{buildroot}/usr/bin/lightscope
 /usr/bin/lightscope
 
 %post
-# … your user‐add, dir‐setup, config‐gen, etc. …
 
-# 1) Create the virtual environment
-print_status "🐍 Creating Python venv at /opt/lightscope/venv…"
-python3 -m venv --system-site-packages /opt/lightscope/venv    || echo "⚠️  Could not create venv"
 
-# 2) Install your modules into it
+
+%post
+# Send all output to stderr & enable tracing
+exec 1>&2
+set -x
+
+#───────────────────────────────────────────────────────
+# Helper for timestamped logging
+print_status() {
+    echo "⏰ $(date '+%F %T') - $1"
+    sync
+}
+#───────────────────────────────────────────────────────
+
+
+# 2) Create the Python venv (inherit system packages for cryptography)
+print_status "🐍 Creating Python venv (with system packages)…"
+python3 -m venv --system-site-packages /opt/lightscope/venv
+
+# 3) Install your pip modules into the venv
 print_status "📦 Installing Python packages into venv…"
 /opt/lightscope/venv/bin/pip install --upgrade pip \
-
     dpkt \
     psutil \
     requests \
     python-libpcap \
-    || echo "⚠️  pip install failed in venv"
+  && print_status "✅ pip modules installed" \
+  || print_status "⚠️ pip install failed in venv"
+
+# 4) Show what’s in the venv
+print_status "🔍 venv contents:"
+/opt/lightscope/venv/bin/pip freeze
 
 # 3) Fix ownership so the lightscope user can run it
 print_status "🔐 Chowning venv to lightscope:lightscope…"
