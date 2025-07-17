@@ -66,7 +66,7 @@ Wants=network-online.target
 Type=notify
 User=lightscope
 Group=lightscope
-ExecStart=/opt/lightscope/bin/lightscope-runner.py
+ExecStart=/opt/lightscope/venv/bin/python /opt/lightscope/bin/lightscope-runner.py
 ExecReload=/bin/kill -HUP $MAINPID
 WorkingDirectory=/opt/lightscope
 Environment=PYTHONPATH=/opt/lightscope
@@ -159,7 +159,40 @@ chmod +x %{buildroot}/usr/bin/lightscope
 /usr/bin/lightscope
 
 %post
-# Force output to be visible during RPM installation and flush immediately
+# … your user‐add, dir‐setup, config‐gen, etc. …
+
+# 1) Create the virtual environment
+print_status "🐍 Creating Python venv at /opt/lightscope/venv…"
+python3 -m venv /opt/lightscope/venv || echo "⚠️  Could not create venv"
+
+# 2) Install your modules into it
+print_status "📦 Installing Python packages into venv…"
+/opt/lightscope/venv/bin/pip install --upgrade pip \
+    dpkt \
+    psutil \
+    requests \
+    python-libpcap \
+    || echo "⚠️  pip install failed in venv"
+
+# 3) Fix ownership so the lightscope user can run it
+print_status "🔐 Chowning venv to lightscope:lightscope…"
+chown -R lightscope:lightscope /opt/lightscope/venv
+
+# 4) (Re)configure your systemd unit to use the venv’s python
+print_status "🔧 Pointing service at venv Python…"
+mkdir -p /etc/systemd/system/lightscope.service.d
+cat > /etc/systemd/system/lightscope.service.d/venv.conf <<-'EOF'
+[Service]
+# override ExecStart to use our venv
+ExecStart=
+ExecStart=/opt/lightscope/venv/bin/python /opt/lightscope/bin/lightscope-runner.py
+EOF
+
+# … reload, enable, start as you already have it …
+
+
+
+
 exec 1>&2
 set -x  # Enable verbose debugging
 
