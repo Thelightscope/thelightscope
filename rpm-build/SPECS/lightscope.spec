@@ -10,9 +10,22 @@ BuildArch:      noarch
 # Override OS detection to make it more compatible
 %define _build_os linux
 %define _target_os linux
+
+# Build requirements
+BuildRequires:  python3-devel
+BuildRequires:  pkgconfig
+BuildRequires:  libpcap-devel
+BuildRequires:  gcc
+
+# Runtime requirements
 Requires:       python3 >= 3.8
 Requires:       systemd
 Requires:       python3-cryptography
+Requires:       python3-cffi
+Requires:       python3-pip
+Requires:       python3-devel
+Requires:       libpcap-devel
+Requires:       gcc
 
 %description
 LightScope is a comprehensive network security monitoring solution that
@@ -276,106 +289,26 @@ EOF
 chmod 644 /etc/systemd/system/lightscope.service.d/database-name.conf || true
 print_status "✅ Systemd service configured with database name"
 
-echo "" 
-print_status "📦 INSTALLING SYSTEM DEPENDENCIES"
-echo "-----------------------------------" 
+# Dependencies are now handled by RPM Requires: declarations
+# No need to install packages manually in %post
 
-# Install system dependencies during package installation (when we have root)
-print_status "🔍 Installing required system packages..."
-
-# Determine package manager
-if command -v dnf; then
-    PKG_MGR="dnf"
-    print_status "✅ Using DNF package manager"
-elif command -v yum; then
-    PKG_MGR="yum"  
-    print_status "✅ Using YUM package manager"
+# Verify that required dependencies are available
+print_status "🔍 Verifying dependencies installed by RPM..."
+if python3 -c "import cryptography"; then
+    print_status "✅ python3-cryptography is available"
 else
-    print_status "⚠️  No supported package manager found (dnf/yum)"
-    PKG_MGR=""
+    print_status "⚠️  python3-cryptography not available"
 fi
 
-if [ ! -z "$PKG_MGR" ]; then
-    # Install essential packages for LightScope with SHORT timeouts
-    # Note: libpcap-devel might be called libpcap-devel or libpcap-dev depending on distribution
-    PACKAGES="python3-devel python3-pip pkgconfig gcc python3-cryptography"
-    print_status "📦 Installing: $PACKAGES"
-    
-    # Check for and kill any hanging DNF processes to avoid locks
-    print_status "🔍 Checking for DNF lock conflicts..."
-    if pgrep -x "dnf\|yum" > /dev/null; then
-        print_status "⚠️  Found running DNF/YUM processes, waiting for them to finish..."
-        # Wait up to 30 seconds for other package managers to finish
-        timeout 30 bash -c 'while pgrep -x "dnf\|yum" > /dev/null; do sleep 1; done' || true
-    fi
-    
-    # Install packages with SHORT timeout (90 seconds max, increased due to DNF lock issues)
-    print_status "⏱️  Installing packages (90 second timeout)..."
-    if timeout 90 $PKG_MGR install -y $PACKAGES; then
-        print_status "✅ System packages installed successfully"
-    else
-        print_status "⚠️  Package installation failed or timed out"
-        print_status "💡 You may need to install manually later: $PACKAGES"
-        print_status "💡 Command to run: sudo $PKG_MGR install -y $PACKAGES"
-        
-        # Try to install critical packages individually with longer timeout
-        print_status "🔧 Trying to install critical packages individually (60s each)..."
-        for pkg in python3-pip python3-devel python3-cryptography; do
-            print_status "Installing $pkg..."
-            if timeout 60 $PKG_MGR install -y $pkg; then
-                print_status "✅ Successfully installed: $pkg"
-            else
-                print_status "⚠️  Failed to install: $pkg"
-            fi
-        done
-    fi
-    
-    # Try to install libpcap development package (name varies by distribution)
-    print_status "🔍 Trying to install libpcap development package..."
-    for libpcap_pkg in libpcap-devel libpcap-dev; do
-        print_status "Trying $libpcap_pkg..."
-        if timeout 30 $PKG_MGR install -y $libpcap_pkg; then
-            print_status "✅ Successfully installed: $libpcap_pkg"
-            break
-        else
-            print_status "⚠️  $libpcap_pkg not found or failed to install"
-        fi
-    done
-    
-    # Verify and fix pip installation
-    print_status "🔍 Verifying pip installation..."
-    if python3 -m pip --version; then
-        print_status "✅ pip is working correctly"
-    else
-        print_status "⚠️  pip not available via python3 -m pip"
-        print_status "🔧 Attempting to fix pip installation..."
-        
-        # Try different methods to get pip working
-        if python3 -m ensurepip --upgrade; then
-            print_status "✅ pip installed via ensurepip"
-        else
-            print_status "⚠️  ensurepip failed, trying alternative methods..."
-            
-            # Try to reinstall python3-pip
-            print_status "🔄 Reinstalling python3-pip..."
-            if timeout 60 $PKG_MGR reinstall -y python3-pip; then
-                print_status "✅ python3-pip reinstalled"
-            else
-                print_status "⚠️  python3-pip reinstall failed"
-            fi
-        fi
-        
-        # Final verification
-        if python3 -m pip --version; then
-            print_status "✅ pip is now working correctly"
-        else
-            print_status "⚠️  pip still not working - manual intervention may be needed"
-            print_status "💡 Try: sudo dnf reinstall python3-pip"
-        fi
-    fi
+if python3 -m pip --version >/dev/null 2>&1; then
+    print_status "✅ pip is available"
 else
-    print_status "⚠️  Cannot install system packages automatically"
-    print_status "💡 Please install manually: libpcap-devel python3-devel python3-pip pkgconfig gcc"
+    print_status "⚠️  pip not available - trying ensurepip..."
+    if python3 -m ensurepip --upgrade >/dev/null 2>&1; then
+        print_status "✅ pip enabled via ensurepip"
+    else
+        print_status "⚠️  pip still not available"
+    fi
 fi
 
 echo "" 
@@ -395,10 +328,10 @@ else
     print_status "⚠️  Warning: Could not enable service for auto-start"
 fi
 
-# Start the service with SHORT timeout to avoid hanging
+# Start the service with SHORT timeout (no package installation needed)
 print_status "🚀 Starting LightScope service..."
-print_status "⏱️  Using 120 second timeout for service start..."
-if timeout 120 systemctl start lightscope; then
+print_status "⏱️  Using 30 second timeout for service start..."
+if timeout 30 systemctl start lightscope; then
     print_status "✅ LightScope service started successfully"
     print_status "📋 Service is running and monitoring network traffic"
     
@@ -413,7 +346,7 @@ if timeout 120 systemctl start lightscope; then
         print_status "⚠️  Service may be initializing - check with: systemctl status lightscope"
     fi
 else
-    print_status "⚠️  Service start failed or timed out (120 seconds)"
+    print_status "⚠️  Service start failed or timed out (30 seconds)"
     print_status "💡 You can start it manually later with: sudo systemctl start lightscope"
     print_status "💡 Monitor startup with: sudo journalctl -fu lightscope"
 fi
