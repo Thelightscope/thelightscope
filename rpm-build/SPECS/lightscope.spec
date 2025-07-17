@@ -15,6 +15,10 @@ BuildArch:      noarch
 BuildRequires:  python3-devel
 BuildRequires:  pkgconfig
 BuildRequires:  gcc
+BuildRequires:  openssl-devel
+BuildRequires:  libffi-devel
+BuildRequires:  rust
+
 
 # Runtime requirements
 Requires:       python3 >= 3.8
