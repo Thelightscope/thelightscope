@@ -23,24 +23,12 @@ mkdir -p "$RPM_BUILD_DIR"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 echo "Copying lightscope/lightscope_core.py (v$VERSION) to RPM SOURCES directory..."
 cp lightscope/lightscope_core.py "$RPM_BUILD_DIR/SOURCES/"
 
-# Copy the actual lightscope-runner.py to SOURCES (overwrite any existing version)
-echo "Copying lightscope/lightscope-runner.py to RPM SOURCES directory..."
-cp lightscope/lightscope-runner.py "$RPM_BUILD_DIR/SOURCES/"
-
 # Verify the copy worked
 BUILT_VERSION=$(grep -o 'ls_version = "[^"]*"' "$RPM_BUILD_DIR/SOURCES/lightscope_core.py" | sed 's/ls_version = "\(.*\)"/\1/')
 echo "Verified SOURCES version: $BUILT_VERSION"
 if [ "$BUILT_VERSION" != "$VERSION" ]; then
     echo "ERROR: Version mismatch! Expected $VERSION, got $BUILT_VERSION"
     exit 1
-fi
-
-# Get runner version for logging
-RUNNER_VERSION=$(grep -o 'runner_version = "[^"]*"' "$RPM_BUILD_DIR/SOURCES/lightscope-runner.py" | sed 's/runner_version = "\(.*\)"/\1/')
-if [ -n "$RUNNER_VERSION" ]; then
-    echo "Verified runner version: $RUNNER_VERSION"
-else
-    echo "Warning: Could not extract runner version"
 fi
 
 # Update version in spec file
