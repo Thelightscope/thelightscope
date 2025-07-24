@@ -1238,7 +1238,6 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        print(f"heartbeat_message {heartbeat_message}",flush=True)
         self.num_total_tcp_packets=0
         self.producer_upload_conn.send(heartbeat_message)                
     
@@ -1323,7 +1322,6 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        print(f"heartbeat_message {payload}",flush=True)
 
         self.producer_upload_conn.send(payload)
         self.unwanted_packet_count=self.unwanted_packet_count+1

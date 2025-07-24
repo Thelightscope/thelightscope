@@ -702,7 +702,7 @@ class _MenuBarIcon(rumps.App):
         )
         try:
             database_id = subprocess.check_output(cmd, shell=True, text=True).strip()
-            url = f"https://thelightscope.com/tables/{database_id}"
+            url = f"https://thelightscope.com/light_table/{database_id}"
             webbrowser.open(url)
         except subprocess.CalledProcessError as e:
             logger.error("Error", f"Could not read database ID:\n{e}")
