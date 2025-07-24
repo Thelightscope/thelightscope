@@ -32,6 +32,8 @@ mkdir -p "$APP_DIR/Contents/Resources/logs"
 echo "Copying lightscope/lightscope_core.py (v$VERSION)..."
 cp lightscope/lightscope_core.py "$APP_DIR/Contents/Resources/bin/lightscope_core.py"
 
+cp ls.png "$APP_DIR/Contents/Resources/ls.png"
+
 # Copy the lightscope-runner.py (macOS version with SSL fixes)
 echo "Copying lightscope-runner-mac.py..."
 cp lightscope/lightscope-runner-mac.py "$APP_DIR/Contents/Resources/bin/lightscope-runner.py"
@@ -274,7 +276,8 @@ if [ ! -d "$VENV_PATH" ] || [ "$RECREATE_VENV" = true ]; then
     
     log "Installing dependencies..."
     pip install --upgrade pip
-    pip install dpkt psutil requests cryptography plyer certifi
+    pip install "urllib3<2.0"
+    pip install dpkt psutil requests cryptography plyer certifi rumps 
     
     # Install local python-libpcap if available
     if [ -d "$RESOURCES_DIR/python-libpcap" ]; then
@@ -541,6 +544,8 @@ echo "🔧 Network monitoring capabilities:"
 echo "   - Monitors TCP traffic on all interfaces"
 echo "   - Runs as regular user (not root)"
 echo "   - Uses Berkeley Packet Filter (BPF) for packet capture"
+echo ""
+echo "    Please wait about 10 secods for initial loading..."
 EOF
 
 # Create uninstall script
@@ -659,28 +664,42 @@ If packet capture fails:
 3. Re-run setup: \`sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh\`
 4. Log out and log back in for group changes to take effect
 EOF
-
-# Create a simple DMG or ZIP package
+# Create a simple ZIP package with a top‑level lightscope directory
 OUTPUT_FILE="LightScope-${VERSION}-macOS.zip"
 echo "Creating package: $OUTPUT_FILE"
 
+# 1) Build a staging folder
+STAGING_DIR="$BUILD_DIR/lightscope"
+rm -rf "$STAGING_DIR"
+mkdir -p "$STAGING_DIR"
+
+# 2) Copy all artifacts into it
+cp -r "$BUILD_DIR/LightScope.app"    "$STAGING_DIR/"
+cp     "$BUILD_DIR/install.sh"       "$STAGING_DIR/"
+cp     "$BUILD_DIR/uninstall.sh"     "$STAGING_DIR/"
+cp     "$BUILD_DIR/README.md"        "$STAGING_DIR/"
+cp -r  "$BUILD_DIR/LaunchAgents"     "$STAGING_DIR/"
+
+
+# 3) Zip up the staging folder
 cd "$BUILD_DIR"
-zip -r "../$OUTPUT_FILE" . -x "*.DS_Store"
+zip -r "../$OUTPUT_FILE" "lightscope" -x "*.DS_Store"
 cd "$SCRIPT_DIR"
 
 echo "✅ macOS package built successfully: $OUTPUT_FILE"
 echo ""
-echo "📦 Package contents:"
-echo "   - LightScope.app (application bundle)"
-echo "   - install.sh (installation script)"
-echo "   - uninstall.sh (uninstallation script)"
-echo "   - README.md (documentation)"
-echo "   - BPF permissions setup script"
+echo "📦 Package contents under 'lightscope/':"
+echo "   - LightScope.app"
+echo "   - install.sh"
+echo "   - uninstall.sh"
+echo "   - README.md"
+echo "   - LaunchAgents/"
 echo ""
 echo "🚀 To install:"
-echo "   1. Extract the ZIP file"
-echo "   2. Run ./install.sh"
+echo "   1. Extract the ZIP (creates a 'lightscope' folder)"
+echo "   2. cd lightscope && ./install.sh"
 echo "   3. Allow BPF permissions setup when prompted"
+
 echo ""
 echo "🔧 Network Monitoring:"
 echo "   - Uses Berkeley Packet Filter (BPF) for packet capture"

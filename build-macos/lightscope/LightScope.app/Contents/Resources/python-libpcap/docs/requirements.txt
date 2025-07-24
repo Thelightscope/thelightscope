@@ -1,0 +1,7 @@
+sphinx
+sphinx_rtd_theme
+mock
+sphinxcontrib.napoleon
+sphinx-markdown-tables
+recommonmark
+sphinx-mdinclude

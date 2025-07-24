@@ -22,16 +22,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
-
-# macOS notification support
-try:
-    import plyer
-    NOTIFICATION_AVAILABLE = True
-    NOTIFICATION_LIBRARY = "plyer"
-except ImportError:
-    NOTIFICATION_AVAILABLE = False
-    NOTIFICATION_LIBRARY = None
-    # Note: logger not yet defined, will log this later
+import rumps
 
 
 # Import systemd watchdog support
@@ -392,264 +383,6 @@ class SecureUpdater:
             logger.error(f"Error downloading update: {e}")
             return False
 
-class LightScopeNotifications:
-    """macOS notifications for LightScope with action buttons"""
-    
-    def __init__(self):
-        self.running = False
-        self.db_name = self.get_db_name()
-        self.last_db_check = 0
-        self.last_status_notification = 0
-        
-    def get_db_name(self):
-        """Get database name from config.ini, waiting for LightScope Core to set it first"""
-        try:
-            config_file = CONFIG_DIR / "config.ini"
-            
-            # First, try to read existing database name from config
-            if config_file.exists():
-                config = configparser.ConfigParser()
-                config.read(config_file)
-                
-                # Try different possible sections and keys
-                possible_locations = [
-                    ('Settings', 'database'),
-                    ('DEFAULT', 'database'),
-                    ('Settings', 'db_name'),
-                    ('DEFAULT', 'db_name')
-                ]
-                
-                for section, key in possible_locations:
-                    if section in config and key in config[section]:
-                        db_name = config[section][key].strip()
-                        if db_name and db_name != "uninitialized":
-                            logger.info(f"Found database name: {db_name}")
-                            return db_name
-                
-                # If database name is empty or uninitialized, wait for LightScope Core
-                logger.info("Database name is empty or uninitialized, waiting for LightScope Core...")
-                
-                # Wait for LightScope Core to set the database name
-                for _ in range(60):  # Wait up to 60 seconds
-                    if shutdown_event.is_set():
-                        return "unknown"
-                    time.sleep(1)
-                    
-                    # Re-read config
-                    config = configparser.ConfigParser()
-                    config.read(config_file)
-                    
-                    for section, key in possible_locations:
-                        if section in config and key in config[section]:
-                            db_name = config[section][key].strip()
-                            if db_name and db_name != "uninitialized":
-                                logger.info(f"Found database name after waiting: {db_name}")
-                                return db_name
-                
-                logger.warning("Database name not found in config after waiting, generating new one...")
-            
-            # Generate new database name if not found
-            import random
-            today = time.strftime("%Y%m%d")
-            rand_part = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=47))
-            db_name = f"{today}_{rand_part}"
-            
-            # Try to save it to config
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            if config_file.exists():
-                config = configparser.ConfigParser()
-                config.read(config_file)
-            else:
-                config = configparser.ConfigParser()
-                config['DEFAULT'] = {}
-            
-            # Set database name
-            if 'DEFAULT' not in config:
-                config['DEFAULT'] = {}
-            config['DEFAULT']['database'] = db_name
-            
-            # Write back to file
-            with open(config_file, 'w') as f:
-                config.write(f)
-            
-            logger.info(f"Generated and saved new database name: {db_name}")
-            return db_name
-            
-        except Exception as e:
-            logger.error(f"Error generating database name: {e}")
-            return "unknown"
-    
-    def send_startup_notification(self):
-        """Send notification when LightScope starts"""
-        if not NOTIFICATION_AVAILABLE:
-            logger.warning("Notifications not available - plyer not installed")
-            return
-            
-        try:
-            # Update database name in case it has changed
-            self.update_db_name_if_needed()
-            
-            # Send startup notification
-            self.send_notification(
-                title="LightScope Started",
-                message=f"Network monitoring active\nDatabase: {self.db_name}",
-                timeout=10,
-                actions=[
-                    {"title": "View Dashboard", "action": "view_dashboard"},
-                    {"title": "Dismiss", "action": "dismiss"}
-                ]
-            )
-            
-            logger.info("Startup notification sent")
-            
-        except Exception as e:
-            logger.error(f"Error sending startup notification: {e}")
-
-    def send_status_notification(self, force=False):
-        """Send periodic status notification"""
-        if not NOTIFICATION_AVAILABLE:
-            return
-            
-        try:
-            current_time = time.time()
-            
-            # Send status notification every 4 hours, or if forced
-            if force or (current_time - self.last_status_notification) > (4 * 60 * 60):
-                # Update database name in case it has changed
-                self.update_db_name_if_needed()
-                
-                self.send_notification(
-                    title="LightScope Status",
-                    message=f"Network monitoring active\nDatabase: {self.db_name}",
-                    timeout=8,
-                    actions=[
-                        {"title": "View Dashboard", "action": "view_dashboard"},
-                        {"title": "Stop LightScope", "action": "quit_lightscope"}
-                    ]
-                )
-                
-                self.last_status_notification = current_time
-                logger.info("Status notification sent")
-                
-        except Exception as e:
-            logger.error(f"Error sending status notification: {e}")
-
-    def send_notification(self, title, message, timeout=10, actions=None):
-        """Send a macOS notification with optional actions"""
-        try:
-            if NOTIFICATION_LIBRARY == "plyer":
-                # Use plyer for basic notifications
-                plyer.notification.notify(
-                    title=title,
-                    message=message,
-                    timeout=timeout,
-                    app_name="LightScope"
-                )
-                logger.info(f"Plyer notification sent: {title}")
-            else:
-                # Fallback to osascript for notifications with actions
-                self.send_osascript_notification(title, message, timeout, actions)
-                
-        except Exception as e:
-            logger.error(f"Error sending notification: {e}")
-            # Fallback to osascript if plyer fails
-            try:
-                self.send_osascript_notification(title, message, timeout, actions)
-            except Exception as e2:
-                logger.error(f"Fallback notification also failed: {e2}")
-    
-    def send_test_notification(self):
-        """Send a test notification to verify the system works"""
-        try:
-            self.send_notification(
-                title="LightScope Test",
-                message="This is a test notification to verify the system is working",
-                timeout=5
-            )
-            logger.info("Test notification sent successfully")
-        except Exception as e:
-            logger.error(f"Test notification failed: {e}")
-
-    def send_osascript_notification(self, title, message, timeout=10, actions=None):
-        """Send notification using osascript with action buttons"""
-        try:
-            import subprocess
-            
-            # Clean message for AppleScript (remove newlines and escape quotes)
-            clean_message = message.replace('\\n', ' - ').replace('\n', ' - ').replace('"', '\\"')
-            clean_title = title.replace('"', '\\"')
-            
-            if actions and len(actions) > 0:
-                # For interactive notifications, we'll use a simpler approach
-                # Just send the notification without buttons for now
-                script = f'display notification "{clean_message}" with title "{clean_title}"'
-                
-                result = subprocess.run(
-                    ["osascript", "-e", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode != 0:
-                    logger.warning(f"osascript notification failed: {result.stderr}")
-                else:
-                    logger.info(f"Notification sent: {clean_title}")
-            else:
-                # Simple notification without buttons
-                script = f'display notification "{clean_message}" with title "{clean_title}"'
-                
-                result = subprocess.run(
-                    ["osascript", "-e", script],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode != 0:
-                    logger.warning(f"osascript notification failed: {result.stderr}")
-                else:
-                    logger.info(f"Notification sent: {clean_title}")
-                
-        except Exception as e:
-            logger.error(f"Error with osascript notification: {e}")
-
-    def handle_notification_action(self, button_result, actions):
-        """Handle notification button clicks"""
-        try:
-            # Map button result to action
-            if "View Dashboard" in button_result or "view_dashboard" in button_result:
-                self.view_dashboard()
-            elif "Stop LightScope" in button_result or "quit_lightscope" in button_result:
-                self.quit_lightscope()
-            elif "Dismiss" in button_result:
-                pass  # Just dismiss, no action needed
-                
-        except Exception as e:
-            logger.error(f"Error handling notification action: {e}")
-
-    def start_notifications(self):
-        """Initialize the notification system"""
-        if NOTIFICATION_AVAILABLE:
-            logger.info("Notification system initialized")
-            self.send_startup_notification()
-            return True
-        else:
-            logger.warning("Notifications not available - plyer not installed")
-            return False
-    
-    def update_db_name_if_needed(self):
-        """Update database name if it has changed or if it's been a while since last check"""
-        current_time = time.time()
-        
-        # Check every 60 seconds for database name updates
-        if current_time - self.last_db_check > 60:
-            new_db_name = self.get_db_name()
-            if new_db_name != self.db_name:
-                logger.info(f"Database name updated from '{self.db_name}' to '{new_db_name}'")
-                self.db_name = new_db_name
-            self.last_db_check = current_time
     
     def view_dashboard(self, icon=None, item=None):
         """Open the LightScope dashboard in the default web browser"""
@@ -800,16 +533,17 @@ def load_lightscope_core():
         if str(BIN_DIR) not in sys.path:
             sys.path.insert(0, str(BIN_DIR))
         
-        # Import the core module (fresh import to get any updates)
+               # Import (or reload) the core module so we always have a local name
         import importlib
         if 'lightscope_core' in sys.modules:
-            importlib.reload(sys.modules['lightscope_core'])
+            lightscope_core = importlib.reload(sys.modules['lightscope_core'])
         else:
-            import lightscope_core
-        
+            import lightscope_core  # binds the name in this scope
+
         # Set global references for the core
         # Always set watchdog function (will be no-op on macOS)
         lightscope_core.systemd_watchdog_notify = notify_systemd_watchdog
+
         
         # Set shutdown event reference so core can check for shutdown
         lightscope_core.runner_shutdown_event = shutdown_event
@@ -866,13 +600,167 @@ def load_lightscope_core():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
-def main():
+
+"""
+# Create a tiny status‑bar app to host the icon
+class _MenuBarIcon(rumps.App):
+    def __init__(self):
+        super().__init__(
+            name="LightScope",
+            icon=str(Path(__file__).parent.parent  / "ls.png"),
+            menu=None  # no menu or you can add ["Quit"]
+        )
+        # Start your main runner logic on a background thread so the menu loop doesn't block
+        threading.Thread(target=self._start_runner, daemon=True).start()
+
+    def _start_runner(self):
+        # import and call your existing main() here
+        runner_main()
+
+# Instantiate before anything else
+_menu_app = _MenuBarIcon()
+
+if __name__ == "__main__":
+    _menu_app.run()  # this starts the status‑bar app + your runner in the background
+"""
+
+import subprocess
+import webbrowser
+from pathlib import Path
+
+class _MenuBarIcon(rumps.App):
+    def __init__(self):
+        script = '''display dialog "Welcome to LightScope! There is now a menu bar icon in the top right corner of your screen. You can click it to view detailed information about your unwanted traffic and who's targeting you.
+
+        If you receive ANY unwanted traffic, we will pop an alert.
+        If you see one of these while you're connected to a sketchy Wi‑Fi hotspot, you should disconnect right away.
+
+        If you see one of these while you're at home, one of your devices (router, Fire Stick, etc.) may be compromised, and you should investigate based on the information in your dashboard.
+
+        Thank you for using LightScope!" buttons {"OK"} default button "OK" with title "LightScope"'''
+
+
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", script],
+            check=False
+        )
+
+        # Configuration
+        if Path("/Applications/LightScope.app/Contents/Resources").exists():
+            LIGHTSCOPE_HOME = Path("/Applications/LightScope.app/Contents/Resources")
+        else:
+            LIGHTSCOPE_HOME = Path("/opt/lightscope")
+
+        CONFIG_DIR  = LIGHTSCOPE_HOME / "config"
+        UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+        LOGS_DIR    = LIGHTSCOPE_HOME / "logs"
+        BIN_DIR     = LIGHTSCOPE_HOME / "bin"
+
+        #  ─── Ensure they all exist ─────────────────────────────────────────────
+        for d in (CONFIG_DIR, UPDATES_DIR, LOGS_DIR, BIN_DIR):
+            d.mkdir(parents=True, exist_ok=True)
+
+        #  ─── Now it’s safe to set up logging ─────────────────────────────────
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(LOGS_DIR / "lightscope-runner.log"),
+                logging.StreamHandler()
+            ]
+        )
+        logger = logging.getLogger("lightscope-runner")
+
+        logger.info("Starting LightScope‑Runner (menu‑bar edition)")
+
+        #  ─── Set up the menu ──────────────────────────────────────────────────
+
+
+        super().__init__(
+            name="LightScope",
+            icon=str(Path(__file__).parent.parent / "ls.png"),
+            menu=["View Dashboard"]
+        )
+        # Start your main runner logic on a background thread so the menu loop doesn't block
+        self.runner_thread=threading.Thread(target=self._start_runner, daemon=True).start()
+
+    def _start_runner(self):
+        try:
+            runner_main()
+        except Exception as e:
+            logger.error(f"Error in _start_runner: {e}")
+
+
+    @rumps.clicked("View Dashboard")
+    def _view_dashboard(self, _):
+        """Read database_id and open the dashboard URL in the browser."""
+        cmd = (
+            "grep '^database = ' "
+            "/Applications/LightScope.app/Contents/Resources/config.ini "
+            "| cut -d'=' -f2 | tr -d ' '"
+        )
+        try:
+            database_id = subprocess.check_output(cmd, shell=True, text=True).strip()
+            url = f"https://thelightscope.com/tables/{database_id}"
+            webbrowser.open(url)
+        except subprocess.CalledProcessError as e:
+            logger.error("Error", f"Could not read database ID:\n{e}")
+
+    @rumps.clicked("Quit")
+    def _quit(self, _):
+
+
+
+        plist_path = os.path.expanduser(
+            "~/Library/LaunchAgents/com.thelightscope.lightscope.plist"
+        )
+
+        try:
+            subprocess.run(
+                ["launchctl", "unload", plist_path],
+                check=True,
+            )
+            print(f"Successfully unloaded {plist_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error unloading plist: {e}")
+
+
+
+
+        self.runner_thread.join(timeout=1)
+        # Tell every background loop to break out
+        shutdown_event.set()
+
+        # Give things a moment to unwind (optional)
+        time.sleep(1)
+
+
+        # Now quit the status‑bar app
+        rumps.quit_application()
+
+        # As a belt‑and‑suspenders, kill the process outright
+        os._exit(0)
+
+
+
+
+
+
+
+def runner_main():
     """Main runner function with proper threading architecture"""
+
+
     logger.info("LightScope Runner starting...")
     
     # Setup signal handlers
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+    try:
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT,  signal_handler)
+            logger.info("Signal handlers installed")
+    except (ValueError, OSError) as e:
+        # ValueError: “signal only works in main thread…”
+        logger.info(f"Skipping signal installation in thread: {e}")
     
     # Ensure directories exist
     ensure_directories()
@@ -880,16 +768,10 @@ def main():
     # Initialize updater
     updater = SecureUpdater()
     
-    # Initialize macOS notifications
-    notifications = LightScopeNotifications()
-    notifications.start_notifications()
-    
-    # Schedule periodic status notifications
-    notifications.schedule_status_notification()
+
     
     # Log notification availability warning if needed
-    if not NOTIFICATION_AVAILABLE:
-        logger.warning("Notifications not available - plyer not installed")
+
     
     # Notify systemd that we're ready to start
     notify_systemd_ready()
@@ -913,7 +795,10 @@ def main():
         watchdog_bg_thread.start()
         
         consecutive_failures = 0
-        max_consecutive_failures = 5
+
+
+
+
         
         # Main execution loop
         while not shutdown_event.is_set():
@@ -933,11 +818,8 @@ def main():
             else:
                 # Failure
                 consecutive_failures += 1
-                logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
+                logger.error(f"LightScope core failed (attempt {consecutive_failures})")
                 
-                if consecutive_failures >= max_consecutive_failures:
-                    logger.error("Too many consecutive failures, exiting...")
-                    sys.exit(1)
                 
                 # Wait before retry with exponential backoff
                 sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 60)
@@ -964,5 +846,9 @@ def main():
         logger.error(f"Traceback: {traceback.format_exc()}")
         sys.exit(1)
 
+# Instantiate before anything else
+
+
 if __name__ == "__main__":
-    main() 
+    _menu_app = _MenuBarIcon()
+    _menu_app.run()
