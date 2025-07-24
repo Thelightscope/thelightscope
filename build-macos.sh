@@ -66,6 +66,196 @@ else
     echo "Warning: lightscope-public.pem not found - updates will be disabled"
 fi
 
+echo ""
+echo "=== Code Signing for macOS Core File ==="
+
+# Check if cryptography is installed
+if ! python3 -c "import cryptography" 2>/dev/null; then
+    echo "Installing cryptography for signing..."
+    pip3 install cryptography
+fi
+
+echo "Checking for signing keys..."
+if [ ! -f "lightscope-private.pem" ] || [ ! -f "lightscope-public.pem" ]; then
+    echo "Generating new RSA key pair..."
+    python3 sign-and-upload.py --generate-keys
+else
+    echo "Using existing key pair:"
+    echo "  - lightscope-private.pem"
+    echo "  - lightscope-public.pem"
+fi
+
+echo ""
+echo "Signing the macOS core file..."
+
+# Create a temporary signing script for the Mac version
+cat > sign-mac-core.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Code Signing Script for LightScope Mac Core File
+"""
+
+import os
+import sys
+import hashlib
+from pathlib import Path
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+
+def load_private_key(private_key_path):
+    """Load private key from file"""
+    try:
+        with open(private_key_path, 'rb') as f:
+            private_key = serialization.load_pem_private_key(
+                f.read(),
+                password=None,
+            )
+        return private_key
+    except Exception as e:
+        print(f"Error loading private key: {e}")
+        return None
+
+def sign_file(file_path, private_key, signature_path):
+    """Sign a file using the private key"""
+    try:
+        # Read the file to be signed
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+        
+        # Debug information
+        print(f"  Signing file size: {len(file_data)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
+        
+        # Create signature
+        signature = private_key.sign(
+            file_data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        # Save signature
+        with open(signature_path, 'wb') as f:
+            f.write(signature)
+        
+        print(f"  Signature size: {len(signature)} bytes")
+        print(f"File signed successfully: {signature_path}")
+        return True
+        
+    except Exception as e:
+        print(f"Error signing file: {e}")
+        return False
+
+def verify_signature(file_path, signature_path, public_key_path):
+    """Verify a signature (for testing)"""
+    try:
+        # Check if files exist
+        if not Path(file_path).exists():
+            print(f"Error: File to verify not found: {file_path}")
+            return False
+        
+        if not Path(signature_path).exists():
+            print(f"Error: Signature file not found: {signature_path}")
+            return False
+        
+        if not Path(public_key_path).exists():
+            print(f"Error: Public key file not found: {public_key_path}")
+            return False
+        
+        # Load public key
+        with open(public_key_path, 'rb') as f:
+            public_key_data = f.read()
+            public_key = serialization.load_pem_public_key(public_key_data)
+        
+        # Read file and signature
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+        
+        with open(signature_path, 'rb') as f:
+            signature = f.read()
+        
+        # Debug information
+        print(f"  File size: {len(file_data)} bytes")
+        print(f"  Signature size: {len(signature)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
+        
+        # Verify signature
+        public_key.verify(
+            signature,
+            file_data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        print("Signature verification successful!")
+        return True
+        
+    except Exception as e:
+        from cryptography.exceptions import InvalidSignature
+        if isinstance(e, InvalidSignature):
+            print(f"Signature verification failed: Invalid signature")
+            print(f"  This means the file was modified after signing OR wrong key pair")
+        else:
+            print(f"Signature verification failed: {e}")
+            print(f"  Exception type: {type(e).__name__}")
+        return False
+
+# Main execution
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print("Usage: python3 sign-mac-core.py <file_to_sign> <private_key> <public_key>")
+        sys.exit(1)
+    
+    file_to_sign = sys.argv[1]
+    private_key_path = sys.argv[2]
+    public_key_path = sys.argv[3]
+    
+    print(f"Signing {file_to_sign}...")
+    
+    # Load private key
+    private_key = load_private_key(private_key_path)
+    if not private_key:
+        sys.exit(1)
+    
+    # Create signature path
+    signature_path = file_to_sign + ".sig"
+    
+    # Sign the file
+    if not sign_file(file_to_sign, private_key, signature_path):
+        sys.exit(1)
+    
+    # Verify the signature
+    print("Verifying signature...")
+    if not verify_signature(file_to_sign, signature_path, public_key_path):
+        sys.exit(1)
+    
+    # Copy public key to the same directory as the signed file
+    import shutil
+    signed_file_dir = Path(file_to_sign).parent
+    public_key_copy = signed_file_dir / "lightscope-public.pem"
+    shutil.copy2(public_key_path, public_key_copy)
+    print(f"Public key copied to: {public_key_copy}")
+    
+    print("✅ Mac core file signing complete!")
+EOF
+
+# Run the signing script
+python3 sign-mac-core.py "$APP_DIR/Contents/Resources/bin/lightscope_core_mac.py" "lightscope-private.pem" "lightscope-public.pem"
+
+# Clean up temporary signing script
+rm sign-mac-core.py
+
+echo "✅ Code signing complete!"
+echo "Created files:"
+echo "  - $APP_DIR/Contents/Resources/bin/lightscope_core_mac.py (signed)"
+echo "  - $APP_DIR/Contents/Resources/bin/lightscope_core_mac.py.sig (signature)"
+echo "  - $APP_DIR/Contents/Resources/bin/lightscope-public.pem (public key for verification)"
+
 # Create Info.plist for the app bundle
 cat > "$APP_DIR/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
