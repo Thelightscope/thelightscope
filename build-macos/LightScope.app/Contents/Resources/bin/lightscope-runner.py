@@ -54,7 +54,7 @@ runner_version = "1.0.0"
 
 print(f"runner_version: {runner_version}")
 
-UPDATE_CHECK_URL = "https://thelightscope.com/latest/version_mac"
+UPDATE_CHECK_URL = "https://thelightscope.com/latest/version"
 DOWNLOAD_URL_BASE = "https://thelightscope.com/latest"
 
 # Setup logging

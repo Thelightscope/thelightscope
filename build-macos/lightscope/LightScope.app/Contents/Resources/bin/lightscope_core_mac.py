@@ -34,6 +34,11 @@ import certifi
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
+
+ls_version = "1.0.8"
+
+print(f"ls_version: {ls_version}")
+
 # New SSL helper classes and functions
 class SSLContextAdapter(HTTPAdapter):
     """Let us mount a custom SSLContext on a Session."""
@@ -267,9 +272,7 @@ def make_info_session(test_url="https://thelightscope.com/ipinfo"):
     """
     return make_heartbeat_session(test_url)
 
-ls_version = "1.0.7"
 
-print(f"ls_version: {ls_version}")
 
 benchmark_times=[]
 
