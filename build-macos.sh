@@ -8,10 +8,10 @@ BUILD_DIR="$SCRIPT_DIR/build-macos"
 PACKAGE_NAME="LightScope"
 APP_DIR="$BUILD_DIR/$PACKAGE_NAME.app"
 
-# Get version from lightscope_core.py
-VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')
+# Get version from lightscope_core_mac.py
+VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core_mac.py | sed 's/ls_version = "\(.*\)"/\1/')
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not extract version from lightscope_core.py"
+    echo "Error: Could not extract version from lightscope_core_mac.py"
     exit 1
 fi
 
@@ -28,9 +28,9 @@ mkdir -p "$APP_DIR/Contents/Resources/bin"
 mkdir -p "$APP_DIR/Contents/Resources/config"
 mkdir -p "$APP_DIR/Contents/Resources/logs"
 
-# Copy the actual lightscope_core.py (works on all platforms)
-echo "Copying lightscope/lightscope_core.py (v$VERSION)..."
-cp lightscope/lightscope_core.py "$APP_DIR/Contents/Resources/bin/lightscope_core.py"
+# Copy the actual lightscope_core_mac.py (works on all platforms)
+echo "Copying lightscope/lightscope_core_mac.py (v$VERSION)..."
+cp lightscope/lightscope_core_mac.py "$APP_DIR/Contents/Resources/bin/lightscope_core_mac.py"
 
 cp ls.png "$APP_DIR/Contents/Resources/ls.png"
 
@@ -546,6 +546,7 @@ echo "   - Runs as regular user (not root)"
 echo "   - Uses Berkeley Packet Filter (BPF) for packet capture"
 echo ""
 echo "    Please wait about 10 secods for initial loading..."
+echo ""
 EOF
 
 # Create uninstall script

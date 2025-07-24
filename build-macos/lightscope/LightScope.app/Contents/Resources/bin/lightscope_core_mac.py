@@ -26,6 +26,246 @@ import platform as platforminfo
 import psutil
 import requests
 import copy
+import subprocess
+
+# SSL imports for the new helper
+import ssl
+import certifi
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+
+# New SSL helper classes and functions
+class SSLContextAdapter(HTTPAdapter):
+    """Let us mount a custom SSLContext on a Session."""
+    def __init__(self, ssl_context, **kwargs):
+        self._ssl_context = ssl_context
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs['ssl_context'] = self._ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs['ssl_context'] = self._ssl_context
+        return super().proxy_manager_for(*args, **kwargs)
+
+
+def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
+    """
+    Try different SSL configurations to find one that works.
+    Returns a Session that successfully connects.
+    """
+    import urllib.parse
+    import time
+    
+    # Extract hostname for SNI
+    parsed_url = urllib.parse.urlparse(test_url)
+    hostname = parsed_url.hostname
+    
+    # Try different SSL configurations in order of preference
+    ssl_configs = []
+    
+    # Config 1: Try basic default context first (most compatible)
+    try:
+        ctx1 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        # Set SNI hostname explicitly
+        ctx1.check_hostname = True
+        ctx1.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("Default SSL Context", ctx1))
+    except Exception as e:
+        print(f"⚠️  Default SSL context failed: {e}")
+    
+    # Config 2: Try TLS 1.2 specifically (good compatibility)
+    try:
+        ctx2 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        ctx2.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx2.maximum_version = ssl.TLSVersion.TLSv1_2
+        ctx2.check_hostname = True
+        ctx2.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("TLS 1.2 Only", ctx2))
+    except (ValueError, AttributeError) as e:
+        print(f"⚠️  TLS 1.2 configuration failed: {e}")
+    
+    # Config 3: Try TLS 1.3 (if available)
+    try:
+        ctx3 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        ctx3.minimum_version = ssl.TLSVersion.TLSv1_3
+        ctx3.maximum_version = ssl.TLSVersion.TLSv1_3
+        ctx3.check_hostname = True
+        ctx3.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("TLS 1.3 Only", ctx3))
+    except (ValueError, AttributeError) as e:
+        print(f"⚠️  TLS 1.3 configuration failed: {e}")
+    
+    # Config 4: Try with broad TLS version range (1.2-1.3)
+    try:
+        ctx4 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        ctx4.minimum_version = ssl.TLSVersion.TLSv1_2
+        # Don't set maximum_version to allow negotiation
+        ctx4.check_hostname = True
+        ctx4.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("TLS 1.2+ Range", ctx4))
+    except (ValueError, AttributeError) as e:
+        print(f"⚠️  TLS 1.2+ range configuration failed: {e}")
+    
+    # Config 5: Try with LibreSSL-compatible ciphers (for macOS)
+    try:
+        ctx5 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        # Use ciphers that work well with LibreSSL on macOS
+        ctx5.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDHE+AES256:DHE+AES256:!aNULL:!MD5:!DSS')
+        ctx5.check_hostname = True
+        ctx5.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("LibreSSL Compatible", ctx5))
+    except (ssl.SSLError, ValueError, AttributeError) as e:
+        print(f"⚠️  LibreSSL cipher configuration failed: {e}")
+    
+    # Config 6: Try with older protocol method (fallback)
+    try:
+        ctx6 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        # Use older protocol setting for older systems
+        if hasattr(ssl, 'PROTOCOL_TLS_CLIENT'):
+            ctx6.protocol = ssl.PROTOCOL_TLS_CLIENT
+        if hasattr(ssl, 'OP_NO_TLSv1') and hasattr(ssl, 'OP_NO_TLSv1_1'):
+            ctx6.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1  # Disable older versions
+        ctx6.check_hostname = True
+        ctx6.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("Legacy Protocol", ctx6))
+    except (ValueError, AttributeError) as e:
+        print(f"⚠️  Legacy protocol configuration failed: {e}")
+    
+    # Config 7: Try with relaxed verification (still encrypted but less strict)
+    try:
+        ctx7 = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=certifi.where()
+        )
+        ctx7.check_hostname = False  # Less strict hostname checking
+        ctx7.verify_mode = ssl.CERT_REQUIRED
+        ssl_configs.append(("Relaxed Verification", ctx7))
+    except Exception as e:
+        print(f"⚠️  Relaxed verification configuration failed: {e}")
+
+    # Try each configuration with retries
+    for config_name, ctx in ssl_configs:
+        for attempt in range(3):  # Try each config up to 3 times
+            sess = requests.Session()
+            sess.mount("https://", SSLContextAdapter(ctx))
+            sess.verify = certifi.where()
+            
+            # Set connection timeout and read timeout
+            sess.timeout = (10, 30)  # (connect_timeout, read_timeout)
+
+            try:
+                # Use GET instead of HEAD since server may not support HEAD
+                resp = sess.get(test_url, timeout=10)
+                resp.raise_for_status()
+                print(f"✔️  Connected with {config_name} (attempt {attempt + 1})")
+                return sess
+            except requests.exceptions.HTTPError as e:
+                # 405 Method Not Allowed means SSL handshake succeeded
+                if e.response.status_code == 405:
+                    print(f"✔️  Connected with {config_name} (SSL handshake successful, attempt {attempt + 1})")
+                    return sess
+                else:
+                    print(f"⚠️  HTTP error with {config_name} (attempt {attempt + 1}): {e}")
+                    if attempt < 2:  # Don't sleep after last attempt
+                        time.sleep(1)
+                    continue
+            except requests.exceptions.SSLError as e:
+                print(f"⚠️  SSL handshake with {config_name} failed (attempt {attempt + 1}): {e}")
+                if attempt < 2:  # Don't sleep after last attempt
+                    time.sleep(1)
+                continue
+            except requests.exceptions.ConnectionError as e:
+                print(f"⚠️  Connection error with {config_name} (attempt {attempt + 1}): {e}")
+                if attempt < 2:  # Don't sleep after last attempt
+                    time.sleep(2)
+                continue
+            except requests.exceptions.Timeout as e:
+                print(f"⚠️  Timeout with {config_name} (attempt {attempt + 1}): {e}")
+                if attempt < 2:  # Don't sleep after last attempt
+                    time.sleep(1)
+                continue
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️  Unexpected error with {config_name} (attempt {attempt + 1}): {e}")
+                if attempt < 2:  # Don't sleep after last attempt
+                    time.sleep(1)
+                continue
+
+    # If all SSL configs failed, try basic requests session as last resort
+    print("⚠️  All SSL configurations failed, trying basic session...")
+    for attempt in range(3):
+        try:
+            basic_session = requests.Session()
+            basic_session.timeout = (10, 30)
+            resp = basic_session.get(test_url, timeout=10)
+            resp.raise_for_status()
+            print(f"✔️  Connected with basic session (no SSL customization, attempt {attempt + 1})")
+            return basic_session
+        except requests.exceptions.HTTPError as e:
+            # 405 Method Not Allowed means SSL handshake succeeded
+            if e.response.status_code == 405:
+                print(f"✔️  Connected with basic session (SSL handshake successful, attempt {attempt + 1})")
+                return basic_session
+            else:
+                print(f"⚠️  Basic session HTTP error (attempt {attempt + 1}): {e}")
+                if attempt < 2:
+                    time.sleep(1)
+        except Exception as e:
+            print(f"⚠️  Basic session error (attempt {attempt + 1}): {e}")
+            if attempt < 2:
+                time.sleep(2)
+
+    # Final fallback: try with urllib3 SSL verification disabled (not recommended but may work)
+    print("⚠️  Trying final fallback with relaxed SSL verification...")
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        fallback_session = requests.Session()
+        fallback_session.verify = False  # Disable SSL verification as last resort
+        fallback_session.timeout = (10, 30)
+        
+        resp = fallback_session.get(test_url, timeout=10)
+        resp.raise_for_status()
+        print("⚠️  Connected with fallback session (SSL verification disabled - not secure)")
+        return fallback_session
+    except Exception as e:
+        print(f"⚠️  Fallback session also failed: {e}")
+
+    raise RuntimeError("Could not negotiate any SSL connection with the server")
+
+
+def make_data_session(test_url="https://thelightscope.com/log_mysql_data"):
+    """
+    Create a session optimized for data upload endpoints.
+    """
+    return make_heartbeat_session(test_url)
+
+
+def make_info_session(test_url="https://thelightscope.com/ipinfo"):
+    """
+    Create a session optimized for info endpoints.
+    """
+    return make_heartbeat_session(test_url)
 
 ls_version = "1.0.7"
 
@@ -512,6 +752,8 @@ class Ports:
         # Track port activity for honeypot rotation
         self.port_counts = Counter()
 
+        self.alert_shown=False
+
 
 
 
@@ -643,6 +885,7 @@ class Ports:
             return True
         else:
             return False
+        
         
     def is_ip_src_on_local_network(self,ip_src):
         if ip_src in self.internal_ips['ipv4'] or ip_src in self.internal_ips['ipv6'] or ip_src==self.external_ip:
@@ -916,7 +1159,21 @@ class Ports:
             
                    
     def Report_unwanted_traffic(self,pkt_info,reason,confidence):
-        
+        if self.alert_shown==False:
+            message = (
+            "Welcome to LightScope!\n"
+            f"Unwanted traffic detected on interface {self.interface_human_readable} "
+            f"from {pkt_info.ip_src} to {pkt_info.ip_dst} on port {pkt_info.tcp_dport}."
+            )
+            script = f'display dialog "{message}" buttons {{"OK"}} default button "OK" with title "LightScope"'
+
+
+            subprocess.run(
+                ["/usr/bin/osascript", "-e", script],
+                check=False
+            )
+            print(f"script {script}",flush=True)
+            self.alert_shown=True
         self.num_unwanted_tcp_packets+=1
         if pkt_info.tcp_dport >1023:
             self.port_counts[pkt_info.tcp_dport] += 1
@@ -924,6 +1181,8 @@ class Ports:
         #self.verify_ip(pkt_info)
         self.prepare_unwanted_syn_data(pkt_info)
 
+
+ 
        
     
     def send_heartbeat(self):
@@ -979,7 +1238,7 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        #print(payload,flush=True)
+        print(f"heartbeat_message {heartbeat_message}",flush=True)
         self.num_total_tcp_packets=0
         self.producer_upload_conn.send(heartbeat_message)                
     
@@ -1064,7 +1323,7 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        #print(payload,flush=True)
+        print(f"heartbeat_message {payload}",flush=True)
 
         self.producer_upload_conn.send(payload)
         self.unwanted_packet_count=self.unwanted_packet_count+1
@@ -1359,14 +1618,32 @@ def send_honeypot_data(consumer_upload_conn):
     IDLE_FLUSH_SEC = 5.0    # flush data if idle this long
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
-    session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=2, pool_maxsize=2)
-    session.mount("https://", adapter)
-    session.mount("http://",  adapter)
+    # Use the improved SSL helper to create a working session
+    session = None
+    ssl_retry_count = 0
+    max_ssl_retries = 3
+    
+    while session is None and ssl_retry_count < max_ssl_retries:
+        try:
+            session = make_data_session(DATA_URL)
+            print(f"[honeypot] SSL session established successfully")
+            break
+        except RuntimeError as e:
+            ssl_retry_count += 1
+            print(f"[honeypot] SSL connection attempt {ssl_retry_count} failed: {e}")
+            if ssl_retry_count < max_ssl_retries:
+                print(f"[honeypot] Retrying SSL connection in {RETRY_BACKOFF} seconds...")
+                time.sleep(RETRY_BACKOFF)
+            else:
+                print(f"[honeypot] All SSL connection attempts failed, falling back to basic session")
+                session = requests.Session()
+                session.timeout = (10, 30)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
     stop_event    = threading.Event()
+    consecutive_failures = 0
+    max_consecutive_failures = 5
 
     # --------------------------- reader thread ---------------------------
     def reader():
@@ -1399,28 +1676,82 @@ def send_honeypot_data(consumer_upload_conn):
             if queue and (len(queue) >= BATCH_SIZE or elapsed >= IDLE_FLUSH_SEC):
                 to_send = min(len(queue), BATCH_SIZE)
                 batch   = [queue.popleft() for _ in range(to_send)]
-                try:
-                    resp = session.post(
-                        DATA_URL,
-                        json={"batch": batch},
-                        headers=HEADERS,
-                        timeout=10,
-                    )
-                    if resp.status_code != 200:
-                        print(f"[honeypot] rejected ({to_send} items): {resp.status_code} {resp.text}", flush=True)
-                        pass
-                    else:
-                        ###print(f"[honeypot] flushed {to_send} items successfully", flush=True)
-                        pass
-                    resp.raise_for_status()
-                    last_activity = time.monotonic()
-                except requests.RequestException as e:
-                    # push them back on front, and retry later
-                    print(f"[honeypot] error, will retry batch: {e}", flush=True)
+                
+                # Try to send the batch with retries
+                retry_count = 0
+                max_retries = 3
+                success = False
+                
+                while retry_count < max_retries and not success:
+                    try:
+                        resp = session.post(
+                            DATA_URL,
+                            json={"batch": batch},
+                            headers=HEADERS,
+                            timeout=15,  # Increased timeout
+                        )
+                        if resp.status_code != 200:
+                            print(f"[honeypot] Server rejected batch ({to_send} items): {resp.status_code} {resp.text[:200]}", flush=True)
+                            # Don't retry on 400-level errors (client errors)
+                            if 400 <= resp.status_code < 500:
+                                break
+                        else:
+                            ###print(f"[honeypot] Successfully sent {to_send} items", flush=True)
+                            consecutive_failures = 0  # Reset failure counter
+                            success = True
+                            
+                        resp.raise_for_status()
+                        last_activity = time.monotonic()
+                        
+                    except requests.exceptions.SSLError as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[honeypot] SSL error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        
+                        # If we have too many consecutive SSL failures, try to recreate session
+                        if consecutive_failures >= max_consecutive_failures:
+                            print(f"[honeypot] Too many consecutive SSL failures, recreating session", flush=True)
+                            try:
+                                session = make_data_session(DATA_URL)
+                                consecutive_failures = 0
+                                print(f"[honeypot] New SSL session created successfully")
+                            except Exception as session_error:
+                                print(f"[honeypot] Failed to recreate session: {session_error}")
+                                session = requests.Session()
+                                session.timeout = (10, 30)
+                        
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF * retry_count)  # Exponential backoff
+                            
+                    except requests.exceptions.ConnectionError as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[honeypot] Connection error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF * retry_count)
+                            
+                    except requests.exceptions.Timeout as e:
+                        retry_count += 1
+                        print(f"[honeypot] Timeout error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF)
+                            
+                    except requests.RequestException as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[honeypot] Request error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF)
+                
+                # If all retries failed, put items back in queue (but limit to prevent infinite growth)
+                if not success and len(queue) < MAX_SIZE // 2:
+                    print(f"[honeypot] All retry attempts failed, requeueing {len(batch)} items", flush=True)
                     for item in reversed(batch):
                         queue.appendleft(item)
-                    time.sleep(RETRY_BACKOFF)
-                    # note: we do _not_ update last_activity so idle timer will trigger again
+                    time.sleep(RETRY_BACKOFF * 2)  # Longer wait before next batch
+                elif not success:
+                    print(f"[honeypot] Dropping {len(batch)} items due to queue size limits", flush=True)
+                    
             else:
                 time.sleep(0.1)
 
@@ -1441,14 +1772,32 @@ def send_data(consumer_upload_conn):
     IDLE_FLUSH_SEC = 5.0    # flush data if idle this long
     RETRY_BACKOFF  = 5      # seconds to wait on failure
 
-    session = requests.Session()
-    adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4)
-    session.mount("https://", adapter)
-    session.mount("http://",  adapter)
+    # Use the improved SSL helper to create a working session
+    session = None
+    ssl_retry_count = 0
+    max_ssl_retries = 3
+    
+    while session is None and ssl_retry_count < max_ssl_retries:
+        try:
+            session = make_data_session(DATA_URL)
+            print(f"[data] SSL session established successfully")
+            break
+        except RuntimeError as e:
+            ssl_retry_count += 1
+            print(f"[data] SSL connection attempt {ssl_retry_count} failed: {e}")
+            if ssl_retry_count < max_ssl_retries:
+                print(f"[data] Retrying SSL connection in {RETRY_BACKOFF} seconds...")
+                time.sleep(RETRY_BACKOFF)
+            else:
+                print(f"[data] All SSL connection attempts failed, falling back to basic session")
+                session = requests.Session()
+                session.timeout = (10, 30)
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
     stop_event    = threading.Event()
+    consecutive_failures = 0
+    max_consecutive_failures = 5
 
     # --------------------------- reader thread ---------------------------
     def reader():
@@ -1481,26 +1830,79 @@ def send_data(consumer_upload_conn):
                 item = queue.popleft()
                 if item.get("db_name") == "heartbeats":
                     hb_count += 1
-                    try:
-                        resp = session.post(
-                            HEARTBEAT_URL,
-                            json=item,
-                            headers=HEADERS,
-                            timeout=10,
+                    # Send heartbeat with retries
+                    retry_count = 0
+                    max_retries = 3
+                    success = False
+                    
+                    while retry_count < max_retries and not success:
+                        try:
+                            resp = session.post(
+                                HEARTBEAT_URL,
+                                json=item,
+                                headers=HEADERS,
+                                timeout=15,  # Increased timeout
+                                
+                            )
+                            if resp.status_code != 200:
+                                print(f"[heartbeat] Server rejected heartbeat ({resp.status_code}): {resp.text[:200]}", flush=True)
+                                # Don't retry on 400-level errors
+                                if 400 <= resp.status_code < 500:
+                                    break
+                            else:
+                                consecutive_failures = 0  # Reset failure counter
+                                success = True
+                                
+                            resp.raise_for_status()
+                            break
                             
-                        )
-                        if resp.status_code != 200:
-                            print(f"[heartbeat] rejected ({resp.status_code}): {resp.text}", flush=True)
-                            pass
-                        resp.raise_for_status()
-                    except requests.RequestException as e:
-                        print(f"[heartbeat] error, will drop: {e}", flush=True)
-                        pass
+                        except requests.exceptions.SSLError as e:
+                            retry_count += 1
+                            consecutive_failures += 1
+                            print(f"[heartbeat] SSL error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                            
+                            # If we have too many consecutive SSL failures, try to recreate session
+                            if consecutive_failures >= max_consecutive_failures:
+                                print(f"[heartbeat] Too many consecutive SSL failures, recreating session", flush=True)
+                                try:
+                                    session = make_data_session(DATA_URL)
+                                    consecutive_failures = 0
+                                    print(f"[heartbeat] New SSL session created successfully")
+                                except Exception as session_error:
+                                    print(f"[heartbeat] Failed to recreate session: {session_error}")
+                                    session = requests.Session()
+                                    session.timeout = (10, 30)
+                            
+                            if retry_count < max_retries:
+                                time.sleep(RETRY_BACKOFF * retry_count)
+                                
+                        except requests.exceptions.ConnectionError as e:
+                            retry_count += 1
+                            consecutive_failures += 1
+                            print(f"[heartbeat] Connection error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                            if retry_count < max_retries:
+                                time.sleep(RETRY_BACKOFF * retry_count)
+                                
+                        except requests.exceptions.Timeout as e:
+                            retry_count += 1
+                            print(f"[heartbeat] Timeout error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                            if retry_count < max_retries:
+                                time.sleep(RETRY_BACKOFF)
+                                
+                        except requests.RequestException as e:
+                            retry_count += 1
+                            consecutive_failures += 1
+                            print(f"[heartbeat] Request error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                            if retry_count < max_retries:
+                                time.sleep(RETRY_BACKOFF)
+                    
+                    if not success:
+                        print(f"[heartbeat] All retry attempts failed, dropping heartbeat", flush=True)
                 else:
                     queue.append(item)
+                    
             if hb_count:
-                print(f"[heartbeat] sent {hb_count} message(s)", flush=True)
-                pass
+                print(f"[heartbeat] Processed {hb_count} heartbeat message(s)", flush=True)
 
             # 2) now, see if it's time to flush a batch of normal data records
             now     = time.monotonic()
@@ -1509,30 +1911,83 @@ def send_data(consumer_upload_conn):
             if queue and (len(queue) >= BATCH_SIZE or elapsed >= IDLE_FLUSH_SEC):
                 to_send = min(len(queue), BATCH_SIZE)
                 batch   = [queue.popleft() for _ in range(to_send)]
-                try:
-                    resp = session.post(
-                        DATA_URL,
-                        json={"batch": batch},
-                        headers=HEADERS,
-                        timeout=10,
+                
+                # Try to send the batch with retries
+                retry_count = 0
+                max_retries = 3
+                success = False
+                
+                while retry_count < max_retries and not success:
+                    try:
+                        resp = session.post(
+                            DATA_URL,
+                            json={"batch": batch},
+                            headers=HEADERS,
+                            timeout=15,  # Increased timeout
+                            
+                        )
+                        if resp.status_code != 200:
+                            print(f"[data] Server rejected batch ({to_send} items): {resp.status_code} {resp.text[:200]}", flush=True)
+                            # Don't retry on 400-level errors
+                            if 400 <= resp.status_code < 500:
+                                break
+                        else:
+                            ###print(f"[data] Successfully sent {to_send} items", flush=True)
+                            consecutive_failures = 0  # Reset failure counter
+                            success = True
+                            
+                        resp.raise_for_status()
+                        last_activity = time.monotonic()
                         
-                    )
-                    if resp.status_code != 200:
-                        ###print(f"[data] rejected ({to_send} items): {resp.status_code} {resp.text}", flush=True)
-                        pass
-                    else:
-                        ###print(f"[data] flushed {to_send} items", flush=True)
-                        pass
-                    resp.raise_for_status()
-                    last_activity = time.monotonic()
-                except requests.RequestException as e:
-                    # push them back on front, and retry later
-                    #print(f"[data] error, will retry batch: {e}", flush=True)
-                    pass
+                    except requests.exceptions.SSLError as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[data] SSL error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        
+                        # If we have too many consecutive SSL failures, try to recreate session
+                        if consecutive_failures >= max_consecutive_failures:
+                            print(f"[data] Too many consecutive SSL failures, recreating session", flush=True)
+                            try:
+                                session = make_data_session(DATA_URL)
+                                consecutive_failures = 0
+                                print(f"[data] New SSL session created successfully")
+                            except Exception as session_error:
+                                print(f"[data] Failed to recreate session: {session_error}")
+                                session = requests.Session()
+                                session.timeout = (10, 30)
+                        
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF * retry_count)  # Exponential backoff
+                            
+                    except requests.exceptions.ConnectionError as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[data] Connection error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF * retry_count)
+                            
+                    except requests.exceptions.Timeout as e:
+                        retry_count += 1
+                        print(f"[data] Timeout error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF)
+                            
+                    except requests.RequestException as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        print(f"[data] Request error (attempt {retry_count}/{max_retries}): {e}", flush=True)
+                        if retry_count < max_retries:
+                            time.sleep(RETRY_BACKOFF)
+                
+                # If all retries failed, put items back in queue (but limit to prevent infinite growth)
+                if not success and len(queue) < MAX_SIZE // 2:
+                    print(f"[data] All retry attempts failed, requeueing {len(batch)} items", flush=True)
                     for item in reversed(batch):
                         queue.appendleft(item)
-                    time.sleep(RETRY_BACKOFF)
-                    # note: we do _not_ update last_activity so idle timer will trigger again
+                    time.sleep(RETRY_BACKOFF * 2)  # Longer wait before next batch
+                elif not success:
+                    print(f"[data] Dropping {len(batch)} items due to queue size limits", flush=True)
+                    
             else:
                 time.sleep(0.1)
 
@@ -1911,61 +2366,116 @@ def check_ip_is_private(ip_str):
         return(f" is not a valid IP address.")
 
 def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
-    try:
-        resp = requests.get(url, timeout=10)  # Increased timeout from 5 to 10 seconds
-        resp.raise_for_status()
-        data = resp.json()
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            # Use the improved SSL helper to create a working session
+            session = None
+            ssl_retry_count = 0
+            max_ssl_retries = 2
+            
+            while session is None and ssl_retry_count < max_ssl_retries:
+                try:
+                    session = make_info_session(url)
+                    print(f"[info] SSL session established successfully (attempt {attempt + 1})")
+                    break
+                except RuntimeError as e:
+                    ssl_retry_count += 1
+                    print(f"[info] SSL connection attempt {ssl_retry_count} failed: {e}")
+                    if ssl_retry_count < max_ssl_retries:
+                        print(f"[info] Retrying SSL connection in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"[info] All SSL connection attempts failed, falling back to basic session")
+                        session = requests.Session()
+                        session.timeout = (10, 30)
+            
+            resp = session.get(url, timeout=15)  # Increased timeout
+            resp.raise_for_status()
+            data = resp.json()
 
-        # Top-level
-        queried_ip = data.get("queried_ip")
+            # Top-level
+            queried_ip = data.get("queried_ip")
 
-        # Drill into the asn and location and company buckets:
-        asn_rec      = data["results"].get("asn",      {}).get("record", {})
-        loc_rec      = data["results"].get("location",  {}).get("record", {})
-        company_rec  = data["results"].get("company",   {}).get("record", {})
+            # Drill into the asn and location and company buckets:
+            asn_rec      = data["results"].get("asn",      {}).get("record", {})
+            loc_rec      = data["results"].get("location",  {}).get("record", {})
+            company_rec  = data["results"].get("company",   {}).get("record", {})
 
-        return {
-            "queried_ip": queried_ip,
-            "ASN":         asn_rec.get("asn"),
-            "domain":      asn_rec.get("domain"),
-            "city":        loc_rec.get("city"),
-            "country":     loc_rec.get("country"),
-            "as_type":     company_rec.get("as_type"),
-            "type":        asn_rec.get("type")
-        }
-    except requests.exceptions.Timeout:
-        ###print("Warning: Timeout fetching external network information. Using fallback values.")
-        return {
-            "queried_ip": "0.0.0.0",
-            "ASN": "unknown",
-            "domain": "unknown",
-            "city": "unknown",
-            "country": "unknown",
-            "as_type": "unknown",
-            "type": "unknown"
-        }
-    except requests.exceptions.RequestException as e:
-        ###print(f"Warning: Network error fetching external network information: {e}. Using fallback values.")
-        return {
-            "queried_ip": "0.0.0.0",
-            "ASN": "unknown",
-            "domain": "unknown",
-            "city": "unknown",
-            "country": "unknown",
-            "as_type": "unknown",
-            "type": "unknown"
-        }
-    except Exception as e:
-        ###print(f"Warning: Unexpected error fetching external network information: {e}. Using fallback values.")
-        return {
-            "queried_ip": "0.0.0.0",
-            "ASN": "unknown",
-            "domain": "unknown",
-            "city": "unknown",
-            "country": "unknown",
-            "as_type": "unknown",
-            "type": "unknown"
-        }
+            result = {
+                "queried_ip": queried_ip,
+                "ASN":         asn_rec.get("asn"),
+                "domain":      asn_rec.get("domain"),
+                "city":        loc_rec.get("city"),
+                "country":     loc_rec.get("country"),
+                "as_type":     company_rec.get("as_type"),
+                "type":        asn_rec.get("type")
+            }
+            
+            print(f"[info] Successfully fetched network information on attempt {attempt + 1}")
+            return result
+            
+        except requests.exceptions.SSLError as e:
+            print(f"[info] SSL error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All SSL attempts failed, using fallback values")
+                
+        except requests.exceptions.ConnectionError as e:
+            print(f"[info] Connection error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All connection attempts failed, using fallback values")
+                
+        except requests.exceptions.Timeout as e:
+            print(f"[info] Timeout error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All timeout attempts failed, using fallback values")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"[info] Network error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All network attempts failed, using fallback values")
+                
+        except (ValueError, KeyError) as e:
+            print(f"[info] JSON parsing error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All JSON parsing attempts failed, using fallback values")
+                
+        except Exception as e:
+            print(f"[info] Unexpected error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"[info] Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"[info] All unexpected error attempts failed, using fallback values")
+    
+    # If all attempts failed, return fallback values
+    print(f"[info] Using fallback network information values")
+    return {
+        "queried_ip": "0.0.0.0",
+        "ASN": "unknown",
+        "domain": "unknown",
+        "city": "unknown",
+        "country": "unknown",
+        "as_type": "unknown",
+        "type": "unknown"
+    }
 
 
 

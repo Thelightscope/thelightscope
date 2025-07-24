@@ -26,6 +26,7 @@ import platform as platforminfo
 import psutil
 import requests
 import copy
+import subprocess
 
 # SSL imports for the new helper
 import ssl
@@ -266,7 +267,7 @@ def make_info_session(test_url="https://thelightscope.com/ipinfo"):
     """
     return make_heartbeat_session(test_url)
 
-ls_version = "1.0.3"
+ls_version = "1.0.7"
 
 print(f"ls_version: {ls_version}")
 
@@ -1158,7 +1159,21 @@ class Ports:
             
                    
     def Report_unwanted_traffic(self,pkt_info,reason,confidence):
-        
+        if self.alert_shown==False:
+            message = (
+            "Welcome to LightScope!\n"
+            f"Unwanted traffic detected on interface {self.interface_human_readable} "
+            f"from {pkt_info.ip_src} to {pkt_info.ip_dst} on port {pkt_info.tcp_dport}. Please check your dashboard for more information. It is likely you are being scanned by someone on this network, and it may not be safe to stay connected. This is the only pop-up warning you will recieve."
+            )
+            script = f'display dialog "{message}" buttons {{"OK"}} default button "OK" with title "LightScope"'
+
+
+            subprocess.run(
+                ["/usr/bin/osascript", "-e", script],
+                check=False
+            )
+            print(f"script {script}",flush=True)
+            self.alert_shown=True
         self.num_unwanted_tcp_packets+=1
         if pkt_info.tcp_dport >1023:
             self.port_counts[pkt_info.tcp_dport] += 1
@@ -1166,23 +1181,8 @@ class Ports:
         #self.verify_ip(pkt_info)
         self.prepare_unwanted_syn_data(pkt_info)
 
-        if self.alert_shown==False:
-            script = (
-            'display dialog "Welcome to LightScope! '
-            f'There is now a menu bar icon in the top right corner of your screen. You can click it to view detailed information your unwanted traffic and who\'s targeting you. 
-            \n\n If you recieve ANY unwanted traffic, we will pop an alert. 
-            If you see one of these while you\'re connected to a sktechy wifi hotspot, you should discconect right away. 
-            \n\nIf you see one of these while you\'re at home, one of your devices (router, firestick, etc) may be compromised, and you should investigate based on the information in your dashboard. 
-            \n\n Thank you for using LightScope! " '
-            'buttons {"OK"} default button "OK" with title "LightScope"'
-            )
 
-            subprocess.run(
-                ["/usr/bin/osascript", "-e", script],
-                check=False
-            )
-            self.alert_shown=True
-
+ 
        
     
     def send_heartbeat(self):
@@ -1238,7 +1238,7 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        #print(payload,flush=True)
+        print(f"heartbeat_message {heartbeat_message}",flush=True)
         self.num_total_tcp_packets=0
         self.producer_upload_conn.send(heartbeat_message)                
     
@@ -1323,7 +1323,7 @@ class Ports:
             "ls_version":                    ls_version
         }
 
-        #print(payload,flush=True)
+        print(f"heartbeat_message {payload}",flush=True)
 
         self.producer_upload_conn.send(payload)
         self.unwanted_packet_count=self.unwanted_packet_count+1

@@ -87,9 +87,9 @@ class SecureUpdater:
         self.load_public_key()
     
     def load_current_version(self):
-        """Load current version from lightscope_core.py"""
+        """Load current version from lightscope_core_mac.py"""
         try:
-            core_path = BIN_DIR / "lightscope_core.py"
+            core_path = BIN_DIR / "lightscope_core_mac.py"
             if core_path.exists():
                 with open(core_path, 'r') as f:
                     content = f.read()
@@ -104,7 +104,7 @@ class SecureUpdater:
                         logger.debug(f"Core file modified: {time.ctime(file_stat.st_mtime)}")
                         logger.debug(f"Core file size: {file_stat.st_size} bytes")
                     else:
-                        logger.warning("Could not extract version from lightscope_core.py")
+                        logger.warning("Could not extract version from lightscope_core_mac.py")
                         # Debug: show first few lines of file for troubleshooting
                         lines = content.splitlines()[:50]
                         logger.debug("First 50 lines of core file:")
@@ -112,7 +112,7 @@ class SecureUpdater:
                             if 'version' in line.lower() or 'ls_version' in line:
                                 logger.debug(f"Line {i}: {line}")
             else:
-                logger.warning("lightscope_core.py not found, assuming first run")
+                logger.warning("lightscope_core_mac.py not found, assuming first run")
         except Exception as e:
             logger.error(f"Error loading current version: {e}")
     
@@ -237,9 +237,9 @@ class SecureUpdater:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
                 
-                # Download the new lightscope_core.py
-                core_url = f"{DOWNLOAD_URL_BASE}/lightscope_core.py"
-                signature_url = f"{DOWNLOAD_URL_BASE}/lightscope_core.py.sig"
+                # Download the new lightscope_core_mac.py
+                core_url = f"{DOWNLOAD_URL_BASE}/lightscope_core_mac.py"
+                signature_url = f"{DOWNLOAD_URL_BASE}/lightscope_core_mac.py.sig"
                 
                 logger.info("Downloading new version...")
                 
@@ -308,11 +308,11 @@ class SecureUpdater:
                         urllib.request.install_opener(opener)
                         
                         # Download core file
-                        core_temp_path = temp_path / "lightscope_core.py"
+                        core_temp_path = temp_path / "lightscope_core_mac.py"
                         urllib.request.urlretrieve(core_url, core_temp_path)
                         
                         # Download signature
-                        sig_temp_path = temp_path / "lightscope_core.py.sig"
+                        sig_temp_path = temp_path / "lightscope_core_mac.py.sig"
                         urllib.request.urlretrieve(signature_url, sig_temp_path)
                         
                         logger.info(f"Successfully downloaded files using {config_name}")
@@ -338,11 +338,11 @@ class SecureUpdater:
                         urllib.request.install_opener(urllib.request.build_opener())
                         
                         # Download core file
-                        core_temp_path = temp_path / "lightscope_core.py"
+                        core_temp_path = temp_path / "lightscope_core_mac.py"
                         urllib.request.urlretrieve(core_url, core_temp_path)
                         
                         # Download signature
-                        sig_temp_path = temp_path / "lightscope_core.py.sig"
+                        sig_temp_path = temp_path / "lightscope_core_mac.py.sig"
                         urllib.request.urlretrieve(signature_url, sig_temp_path)
                         
                         logger.info("Successfully downloaded files using basic urllib")
@@ -362,7 +362,7 @@ class SecureUpdater:
                     return False
                 
                 # Backup current version
-                current_core = BIN_DIR / "lightscope_core.py"
+                current_core = BIN_DIR / "lightscope_core_mac.py"
                 if current_core.exists():
                     backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
                     current_core.rename(backup_path)
@@ -519,14 +519,14 @@ def signal_handler(signum, frame):
     shutdown_event.set()
 
 def load_lightscope_core():
-    """Dynamically load and execute lightscope_core.py with proper threading support"""
+    """Dynamically load and execute lightscope_core_mac.py with proper threading support"""
     global lightscope_process
     
     try:
-        core_path = BIN_DIR / "lightscope_core.py"
+        core_path = BIN_DIR / "lightscope_core_mac.py"
         
         if not core_path.exists():
-            logger.error("lightscope_core.py not found!")
+            logger.error("lightscope_core_mac.py not found!")
             return False
         
         # Add the bin directory to Python path
@@ -536,25 +536,25 @@ def load_lightscope_core():
                # Import (or reload) the core module so we always have a local name
         import importlib
         if 'lightscope_core' in sys.modules:
-            lightscope_core = importlib.reload(sys.modules['lightscope_core'])
+            lightscope_core_mac = importlib.reload(sys.modules['lightscope_core_mac'])
         else:
-            import lightscope_core  # binds the name in this scope
+            import lightscope_core_mac  # binds the name in this scope
 
         # Set global references for the core
         # Always set watchdog function (will be no-op on macOS)
-        lightscope_core.systemd_watchdog_notify = notify_systemd_watchdog
+        lightscope_core_mac.systemd_watchdog_notify = notify_systemd_watchdog
 
         
         # Set shutdown event reference so core can check for shutdown
-        lightscope_core.runner_shutdown_event = shutdown_event
-        lightscope_core.runner_update_event = update_available_event
+        lightscope_core_mac.runner_shutdown_event = shutdown_event
+        lightscope_core_mac.runner_update_event = update_available_event
         
         # Run the main function in a way that can be interrupted
         logger.info("Starting LightScope core...")
         
         def run_core():
             try:
-                lightscope_core.lightscope_run()
+                lightscope_core_mac.lightscope_run()
             except Exception as e:
                 logger.error(f"LightScope core error: {e}")
                 import traceback
@@ -679,7 +679,8 @@ class _MenuBarIcon(rumps.App):
         super().__init__(
             name="LightScope",
             icon=str(Path(__file__).parent.parent / "ls.png"),
-            menu=["View Dashboard"]
+            menu=["View Dashboard"],
+            quit_button=None,
         )
         # Start your main runner logic on a background thread so the menu loop doesn't block
         self.runner_thread=threading.Thread(target=self._start_runner, daemon=True).start()
@@ -708,8 +709,6 @@ class _MenuBarIcon(rumps.App):
 
     @rumps.clicked("Quit")
     def _quit(self, _):
-
-
 
         plist_path = os.path.expanduser(
             "~/Library/LaunchAgents/com.thelightscope.lightscope.plist"
