@@ -871,8 +871,14 @@ cp     "$BUILD_DIR/uninstall.sh"     "$STAGING_DIR/"
 cp     "$BUILD_DIR/README.md"        "$STAGING_DIR/"
 cp -r  "$BUILD_DIR/LaunchAgents"     "$STAGING_DIR/"
 
+# 3) Clean up duplicate files from build directory (keep only in staging)
+rm -f "$BUILD_DIR/install.sh"
+rm -f "$BUILD_DIR/uninstall.sh" 
+rm -f "$BUILD_DIR/README.md"
+rm -rf "$BUILD_DIR/LaunchAgents"
+# Note: Keep LightScope.app in build directory for reference
 
-# 3) Zip up the staging folder
+# 4) Zip up the staging folder
 cd "$BUILD_DIR"
 zip -r "../$OUTPUT_FILE" "lightscope" -x "*.DS_Store"
 cd "$SCRIPT_DIR"

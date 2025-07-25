@@ -383,26 +383,41 @@ echo "📤 Uploading macOS files to server..."
 
 # Upload individual files
 echo "Uploading lightscope_core_mac.py..."
-sshpass -p "$SERVER_PASSWORD" scp upload/lightscope_core_mac.py ${SERVER_USER_HOST}:/var/www/lightscope/latest/
+sshpass -p "$SERVER_PASSWORD" scp upload/lightscope_core_mac.py ${SERVER_USER_HOST}:~/
 
 echo "Uploading lightscope_core_mac.py.sig..."
-sshpass -p "$SERVER_PASSWORD" scp upload/lightscope_core_mac.py.sig ${SERVER_USER_HOST}:/var/www/lightscope/latest/
+sshpass -p "$SERVER_PASSWORD" scp upload/lightscope_core_mac.py.sig ${SERVER_USER_HOST}:~/
 
 echo "Uploading public key..."
-sshpass -p "$SERVER_PASSWORD" scp upload/lightscope-public.pem ${SERVER_USER_HOST}:/var/www/lightscope/latest/public-key
+sshpass -p "$SERVER_PASSWORD" scp upload/lightscope-public.pem ${SERVER_USER_HOST}:~/
 
 echo "Uploading macOS version info..."
-sshpass -p "$SERVER_PASSWORD" scp upload/version_mac ${SERVER_USER_HOST}:/var/www/lightscope/latest/
+sshpass -p "$SERVER_PASSWORD" scp upload/version_mac ${SERVER_USER_HOST}:~/
 
 echo "Uploading macOS installer package..."
-sshpass -p "$SERVER_PASSWORD" scp upload/LightScope-*-macOS.zip ${SERVER_USER_HOST}:/var/www/lightscope/latest/
+sshpass -p "$SERVER_PASSWORD" scp upload/LightScope-*-macOS.zip ${SERVER_USER_HOST}:~/
 
 echo ""
-echo "🔧 Setting proper permissions on server..."
+echo "🔧 Moving files to final location and setting permissions on server..."
 
-# Set permissions script
-sshpass -p "$SERVER_PASSWORD" ssh ${SERVER_USER_HOST} "
+# Create deployment script similar to dpkg version
+sshpass -p "$SERVER_PASSWORD" ssh -t ${SERVER_USER_HOST} "
+echo 'Moving macOS files to /tmp...'
+mv lightscope_core_mac.py /tmp/ 2>/dev/null || true
+mv lightscope_core_mac.py.sig /tmp/ 2>/dev/null || true
+mv lightscope-public.pem /tmp/ 2>/dev/null || true
+mv version_mac /tmp/ 2>/dev/null || true
+mv LightScope-*-macOS.zip /tmp/ 2>/dev/null || true
+
+echo 'Switching to root and deploying macOS files...'
 sudo bash -c '
+    echo \"Moving macOS files to final location...\"
+    mv /tmp/lightscope_core_mac.py /var/www/lightscope/latest/
+    mv /tmp/lightscope_core_mac.py.sig /var/www/lightscope/latest/
+    mv /tmp/lightscope-public.pem /var/www/lightscope/latest/public-key
+    mv /tmp/version_mac /var/www/lightscope/latest/
+    mv /tmp/LightScope-*-macOS.zip /var/www/lightscope/latest/ 2>/dev/null || echo \"No macOS ZIP package to move\"
+    
     echo \"Setting proper permissions for macOS files...\"
     chown -R www-data:www-data /var/www/lightscope/latest/
     chmod -R 644 /var/www/lightscope/latest/*
