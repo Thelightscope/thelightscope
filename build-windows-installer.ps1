@@ -120,7 +120,7 @@ function Prepare-BuildFiles {
     # Define all required files with their correct source paths
     $filesToCopy = @(
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope\lightscope_core.py'); name = 'lightscope_core.py'},
-        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-runner-windows.py'); name = 'lightscope-runner-windows.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope\lightscope-runner-windows.py'); name = 'lightscope-runner-windows.py'},
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'install-missing-dependencies.py'); name = 'install-missing-dependencies.py'},
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'README-INSTALLATION.md'); name = 'README-INSTALLATION.md'},
         @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-installer.nsi'); name = 'lightscope-installer.nsi'},
