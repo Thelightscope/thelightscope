@@ -181,9 +181,22 @@ class LightScopeTray:
                     
                     logger.info(f"Waiting for LightScope Core to set database name... ({attempt + 1}/30)")
                 
-                # If still no database name after waiting, generate one as last resort
-                logger.info("LightScope Core didn't set database name, generating as last resort...")
-                return self.generate_and_save_db_name()
+                # If still no database name after waiting, wait longer
+                logger.warning("LightScope Core hasn't set database name yet, waiting longer...")
+                # Wait up to 2 minutes total
+                for extra_attempt in range(90):
+                    time.sleep(1)
+                    config = configparser.ConfigParser()
+                    config.read(config_file)
+                    for section, key in possible_locations:
+                        if section in config and key in config[section]:
+                            db_name = config[section][key].strip()
+                            if db_name and db_name != "uninitialized":
+                                logger.info(f"LightScope Core finally set database name: {db_name}")
+                                return db_name
+                # If still nothing, return placeholder
+                logger.error("Database name not available after extended wait")
+                return "initializing"
                 
         except Exception as e:
             logger.error(f"Error reading database name from config: {e}")
@@ -197,58 +210,34 @@ class LightScopeTray:
                 return self.get_db_name()  # Recursive call to read the newly created file
             logger.info(f"Waiting for LightScope Core to create config... ({attempt + 1}/10)")
         
-        # Final fallback - generate database name
-        logger.info("LightScope Core didn't create config, generating database name as final fallback...")
-        return self.generate_and_save_db_name()
+        # Final fallback - return placeholder
+        logger.error("Config file not created by LightScope Core")
+        return "initializing"
     
-    def generate_and_save_db_name(self):
-        """Generate a new database name and save it to config.ini (only if none exists)"""
+    def read_db_name_from_config(self):
+        """Read database name from config.ini - DO NOT generate"""
         try:
             config_file = CONFIG_DIR / "config.ini"
             
-            # Ensure config directory exists
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            if not config_file.exists():
+                logger.warning("Config file does not exist yet")
+                return None
             
             config = configparser.ConfigParser()
-            if config_file.exists():
-                config.read(config_file)
-                
-                # Check if database name already exists and is valid
-                if config.has_section('Settings') and 'database' in config['Settings']:
-                    existing_db_name = config['Settings']['database'].strip()
-                    if existing_db_name and existing_db_name != "uninitialized":
-                        logger.info(f"Database name already exists: {existing_db_name}")
-                        return existing_db_name
+            config.read(config_file)
             
-            # Generate new database name only if none exists
-            import datetime
-            import random
-            import string
+            # Check if database name exists and is valid
+            if config.has_section('Settings') and 'database' in config['Settings']:
+                db_name = config['Settings']['database'].strip()
+                if db_name and db_name != "uninitialized":
+                    logger.info(f"Read database name from config: {db_name}")
+                    return db_name
             
-            # Generate database name like the core does
-            today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-            max_len = 63                                   # leave room under 64
-            rand_len = max_len - len(today) - 1            # "-1" for the underscore
-            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-            db_name = f"{today}_{rand_part}"
-            
-            # Ensure Settings section exists
-            if not config.has_section('Settings'):
-                config.add_section('Settings')
-            
-            # Set the database name
-            config['Settings']['database'] = db_name
-            
-            # Write back to file
-            with open(config_file, 'w') as f:
-                config.write(f)
-            
-            logger.info(f"Generated and saved new database name: {db_name}")
-            return db_name
+            return None
             
         except Exception as e:
-            logger.error(f"Error generating database name: {e}")
-            return "unknown"
+            logger.error(f"Error reading database name: {e}")
+            return None
     
     def create_icon_image(self):
         """Create icon image from ls.png file or fallback to generated icon"""
@@ -329,7 +318,8 @@ class LightScopeTray:
             # Update database name in case it has changed
             self.update_db_name_if_needed()
             
-            url = f"https://thelightscope.com/tables/{self.db_name}"
+            # Use light_table URL like macOS client
+            url = f"https://thelightscope.com/light_table/{self.db_name}"
             webbrowser.open(url)
             logger.info(f"Opened dashboard: {url}")
         except Exception as e:
@@ -1004,29 +994,26 @@ def ensure_config_database_name():
             
             logger.info(f"Waiting for LightScope Core to set database name... ({attempt + 1}/30)")
         
-        # If still no database name after waiting, generate one as last resort
-        logger.info("LightScope Core didn't set database name, generating as last resort...")
+        # If still no database name after waiting, wait even longer
+        logger.warning("LightScope Core hasn't set database name in config yet, extending wait...")
         
-        # Generate database name like the core does
-        import datetime
-        import random
-        import string
+        # Wait up to 2 more minutes
+        for extra_attempt in range(120):
+            time.sleep(1)
+            if config_file.exists():
+                config = configparser.ConfigParser()
+                config.read(config_file)
+                if config.has_section('Settings') and 'database' in config['Settings']:
+                    db_name = config['Settings']['database'].strip()
+                    if db_name and db_name != "uninitialized":
+                        logger.info(f"LightScope Core finally set database name: {db_name}")
+                        return db_name
+            if extra_attempt % 30 == 0:
+                logger.info(f"Still waiting for Core to set database name... ({30 + extra_attempt}s total)")
         
-        today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-        max_len = 63                                   # leave room under 64
-        rand_len = max_len - len(today) - 1            # "-1" for the underscore
-        rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-        db_name = f"{today}_{rand_part}"
-        
-        # Set the database name
-        config['Settings']['database'] = db_name
-        
-        # Write back to file
-        with open(config_file, 'w') as f:
-            config.write(f)
-        
-        logger.info(f"Generated database name: {db_name}")
-        return db_name
+        # Last resort - DO NOT generate, just return error state
+        logger.error("Database name not set by Core after extended wait")
+        return "error_no_database"
         
     except Exception as e:
         logger.error(f"Error ensuring database name: {e}")
@@ -1134,6 +1121,7 @@ def main():
         last_update_check = time.time()
         update_interval = 24 * 60 * 60  # 24 hours
         consecutive_failures = 0
+        max_consecutive_failures = 5  # Increased from 3 to 5 for better recovery
         
         # Main execution loop with periodic update checks
         while True:
@@ -1160,16 +1148,22 @@ def main():
                 break
             else:
                 consecutive_failures += 1
-                logger.error(f"LightScope core failed (attempt {consecutive_failures})")
-                logger.info("Will retry indefinitely until successful or shutdown requested")
+                logger.error(f"LightScope core failed (attempt {consecutive_failures}/{max_consecutive_failures})")
                 
                 # If this is a dependency-related failure, try to fix it
                 if consecutive_failures <= 3:  # Only try dependency fixes for first few attempts
                     logger.info("Checking if dependency issues can be resolved...")
                     check_and_install_dependencies()
                 
-                # Wait before retry, with exponential backoff (max 5 minutes)
-                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 300)
+                # If too many consecutive failures, exit and let startup system handle restart
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error("Too many consecutive failures, exiting...")
+                    logger.error("This might indicate a persistent configuration or system issue")
+                    logger.error("Please check the installation and system requirements")
+                    sys.exit(1)
+                
+                # Wait before retry, with exponential backoff
+                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 60)
                 logger.info(f"Retrying in {sleep_time} seconds...")
                 time.sleep(sleep_time)
                 
