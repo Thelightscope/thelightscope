@@ -72,23 +72,35 @@ except Exception as e:
     print(f"✗ ERROR: Unexpected error importing pywintypes - {e}")
 
 # Configuration
-# Dynamically determine installation directory based on script location
+# Always get script directory for reference
 SCRIPT_DIR = Path(__file__).parent.absolute()
-# If running from bin subdirectory, parent is LIGHTSCOPE_HOME
-if SCRIPT_DIR.name == "bin":
-    LIGHTSCOPE_HOME = SCRIPT_DIR.parent
+
+# On Windows, use the standard %LOCALAPPDATA% location
+if sys.platform.startswith('win'):
+    # Windows: Use %LOCALAPPDATA%\LightScope
+    LIGHTSCOPE_HOME = Path(os.environ.get('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local'))) / "LightScope"
+    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+    BIN_DIR = LIGHTSCOPE_HOME / "bin"
+    
+    # If BIN_DIR doesn't exist, use LIGHTSCOPE_HOME directly
+    if not BIN_DIR.exists():
+        BIN_DIR = LIGHTSCOPE_HOME
 else:
-    # If running from root directory, use current directory
-    LIGHTSCOPE_HOME = SCRIPT_DIR
-
-CONFIG_DIR = LIGHTSCOPE_HOME / "config"
-UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
-LOGS_DIR = LIGHTSCOPE_HOME / "logs"
-BIN_DIR = LIGHTSCOPE_HOME / "bin"
-
-# If BIN_DIR doesn't exist, we're probably running from the root directory
-if not BIN_DIR.exists():
-    BIN_DIR = LIGHTSCOPE_HOME
+    # Non-Windows: Use script location
+    if SCRIPT_DIR.name == "bin":
+        LIGHTSCOPE_HOME = SCRIPT_DIR.parent
+    else:
+        LIGHTSCOPE_HOME = SCRIPT_DIR
+    
+    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+    BIN_DIR = LIGHTSCOPE_HOME / "bin"
+    
+    if not BIN_DIR.exists():
+        BIN_DIR = LIGHTSCOPE_HOME
 
 UPDATE_CHECK_URL = "https://thelightscope.com/latest/version"
 DOWNLOAD_URL_BASE = "https://thelightscope.com/latest"
@@ -134,14 +146,20 @@ class LightScopeTray:
     def get_db_name(self):
         """Get database name from config.ini"""
         try:
-            config_file = CONFIG_DIR / "config.ini"
+            # On Windows, config.ini is directly in LIGHTSCOPE_HOME, not in a config subdirectory
+            if sys.platform.startswith('win'):
+                config_file = LIGHTSCOPE_HOME / "config.ini"
+            else:
+                config_file = CONFIG_DIR / "config.ini"
+            logger.info(f"Looking for config file at: {config_file}")
             
             if not config_file.exists():
-                logger.error("Config file does not exist")
+                logger.error(f"Config file does not exist at: {config_file}")
                 return None
             
             config = configparser.ConfigParser()
             config.read(config_file)
+            logger.info(f"Config sections found: {list(config.sections())}")
             
             # Try different possible sections and keys
             possible_locations = [
@@ -152,11 +170,18 @@ class LightScopeTray:
             ]
             
             for section, key in possible_locations:
+                logger.info(f"Checking section '{section}', key '{key}'")
                 if section in config and key in config[section]:
                     db_name = config[section][key].strip()
+                    logger.info(f"Found value: '{db_name}'")
                     if db_name and db_name != "uninitialized":
                         logger.info(f"Found database name: {db_name}")
                         return db_name
+                else:
+                    if section in config:
+                        logger.info(f"Section '{section}' exists but key '{key}' not found. Available keys: {list(config[section].keys())}")
+                    else:
+                        logger.info(f"Section '{section}' not found")
             
             logger.error("No valid database name found in config")
             return None
