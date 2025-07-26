@@ -1,12 +1,12 @@
 {
-  "version": "1.0.9",
-  "sha256": "d8b18ecf7e68728a04c5663a732e0aedba20d95c9b2a0a420ab8e0831c0baf52",
+  "version": "1.0.10",
+  "sha256": "f4e5d716081e3ce1da0282f8027718a782cba01ffad2cbb8cc13476b47514b4a",
   "filename": "lightscope_core_mac.py",
   "download_url": "https://thelightscope.com/latest/lightscope_core_mac.py",
   "signature_url": "https://thelightscope.com/latest/lightscope_core_mac.py.sig",
   "public_key_url": "https://thelightscope.com/latest/public-key",
   "version_url": "https://thelightscope.com/latest/version_mac",
-  "release_notes": "LightScope macOS version 1.0.9",
+  "release_notes": "LightScope macOS version 1.0.10",
   "minimum_runner_version": "1.0.0",
   "platform": "macOS"
 }

@@ -35,7 +35,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
 
-ls_version = "1.0.9"
+ls_version = "1.0.10"
 
 print(f"ls_version: {ls_version}")
 

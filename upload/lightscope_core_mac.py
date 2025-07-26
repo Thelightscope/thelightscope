@@ -35,7 +35,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
 
-ls_version = "1.0.9"
+ls_version = "1.0.10"
 
 print(f"ls_version: {ls_version}")
 
@@ -62,6 +62,7 @@ def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
     """
     import urllib.parse
     import time
+    import urllib3
     
     # Extract hostname for SNI
     parsed_url = urllib.parse.urlparse(test_url)
@@ -70,7 +71,48 @@ def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
     # Try different SSL configurations in order of preference
     ssl_configs = []
     
-    # Config 1: Try basic default context first (most compatible)
+    # Config 1: Try with system default SSL (no custom context)
+    # This often works better on macOS with LibreSSL
+    try:
+        # Just use requests without custom SSL context
+        sess = requests.Session()
+        # Update User-Agent to be more compatible
+        sess.headers.update({
+            'User-Agent': 'LightScope/1.0 (macOS; compatible)',
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'
+        })
+        # Quick test
+        try:
+            resp = sess.get(test_url, timeout=5)
+            print(f"✔️  Connected with system default SSL")
+            return sess
+        except requests.exceptions.HTTPError as e:
+            if e.response and e.response.status_code == 405:
+                print(f"✔️  Connected with system default SSL (SSL handshake successful)")
+                return sess
+        except:
+            pass  # Try other configs
+    except Exception as e:
+        print(f"⚠️  System default SSL failed: {e}")
+    
+    # Config 2: Try urllib3 with custom settings
+    try:
+        sess = requests.Session()
+        # Disable SSL warnings temporarily for testing
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        # Try with different SSL settings
+        sess.verify = certifi.where()
+        sess.headers.update({
+            'User-Agent': 'LightScope/1.0 (macOS; compatible)',
+            'Accept': '*/*'
+        })
+        ssl_configs.append(("Certifi Bundle", sess))
+    except Exception as e:
+        print(f"⚠️  Certifi bundle configuration failed: {e}")
+    
+    # Config 3: Try basic default context (most compatible)
     try:
         ctx1 = ssl.create_default_context(
             purpose=ssl.Purpose.SERVER_AUTH,
@@ -79,6 +121,7 @@ def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
         # Set SNI hostname explicitly
         ctx1.check_hostname = True
         ctx1.verify_mode = ssl.CERT_REQUIRED
+        # Don't restrict to specific TLS versions - let it negotiate
         ssl_configs.append(("Default SSL Context", ctx1))
     except Exception as e:
         print(f"⚠️  Default SSL context failed: {e}")
@@ -169,11 +212,16 @@ def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
         print(f"⚠️  Relaxed verification configuration failed: {e}")
 
     # Try each configuration with retries
-    for config_name, ctx in ssl_configs:
+    for config_name, config in ssl_configs:
         for attempt in range(3):  # Try each config up to 3 times
-            sess = requests.Session()
-            sess.mount("https://", SSLContextAdapter(ctx))
-            sess.verify = certifi.where()
+            if isinstance(config, requests.Session):
+                # Already a session, just use it
+                sess = config
+            else:
+                # SSL context, create session with adapter
+                sess = requests.Session()
+                sess.mount("https://", SSLContextAdapter(config))
+                sess.verify = certifi.where()
             
             # Set connection timeout and read timeout
             sess.timeout = (10, 30)  # (connect_timeout, read_timeout)
@@ -256,6 +304,30 @@ def make_heartbeat_session(test_url="https://thelightscope.com/heartbeat"):
     except Exception as e:
         print(f"⚠️  Fallback session also failed: {e}")
 
+    # Final fallback: Try using system curl command for verification
+    print("⚠️  All Python SSL methods failed, trying system curl...")
+    try:
+        import subprocess
+        # Test with curl
+        result = subprocess.run(
+            ['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', test_url],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            status_code = result.stdout.strip()
+            print(f"✔️  System curl succeeded with status {status_code}")
+            # Create a basic session that might work
+            sess = requests.Session()
+            # Try to disable SSL verification as last resort
+            sess.verify = False
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            print("⚠️  WARNING: SSL verification disabled as last resort")
+            return sess
+    except Exception as e:
+        print(f"⚠️  System curl test failed: {e}")
+    
     raise RuntimeError("Could not negotiate any SSL connection with the server")
 
 
@@ -270,6 +342,27 @@ def make_info_session(test_url="https://thelightscope.com/ipinfo"):
     """
     Create a session optimized for info endpoints.
     """
+    # First try a simple session without any SSL customization
+    try:
+        sess = requests.Session()
+        sess.headers.update({
+            'User-Agent': 'LightScope/1.0 (macOS; compatible)',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        })
+        # Quick test
+        resp = sess.get(test_url, timeout=5)
+        print(f"✔️  Connected to info endpoint with simple session")
+        return sess
+    except requests.exceptions.HTTPError as e:
+        if e.response and e.response.status_code == 405:
+            print(f"✔️  Connected to info endpoint (method not allowed but SSL works)")
+            return sess
+    except Exception as e:
+        print(f"⚠️  Simple session failed for info endpoint: {e}")
+    
+    # Fall back to the full SSL negotiation
     return make_heartbeat_session(test_url)
 
 
