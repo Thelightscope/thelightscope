@@ -19,6 +19,7 @@ import time
 from collections import defaultdict, deque, OrderedDict
 from sys import platform
 from collections import Counter
+from typing import List
 import socket, select, time
 # Third-party imports
 import dpkt
@@ -27,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.7"
+ls_version = "1.0.9"
 
 print(f"ls_version: {ls_version}")
 
@@ -274,7 +275,7 @@ TCP_OPT_NAMES = {
     # and any future ones will be rendered as OPT<kind>
 }
 
-def human_readable_tcp_opts(raw_opts: bytes) -> list[str]:
+def human_readable_tcp_opts(raw_opts: bytes) -> List[str]:
     """
     Turn the raw TCP-options bytes into a list of humanreadable strings.
     Unknown kinds become "OPT<kind>".

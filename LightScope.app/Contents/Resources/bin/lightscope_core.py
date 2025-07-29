@@ -2780,7 +2780,7 @@ class configuration_reader:
         self.randomization_key="uninitialized"
         self.initialize_config("config.ini")
         self.load_config(config_file)
-        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/tables/{self.database}")
+        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
 
 
     def get_config(self):

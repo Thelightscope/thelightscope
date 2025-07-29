@@ -110,7 +110,7 @@ LightScope now includes a system tray icon for easy access:
 
 The system tray icon automatically:
 - Reads your database name from `config.ini`
-- Opens the correct dashboard URL: `https://thelightscope.com/tables/{db_name}`
+- Opens the correct dashboard URL: `https://thelightscope.com/light_table/{db_name}`
 - Provides clean exit option without using Task Manager
 
 ### Using Windows Services
