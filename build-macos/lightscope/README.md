@@ -1,4 +1,4 @@
-# LightScope for macOS v1.0.12
+# LightScope for macOS v1.0.13
 
 ## Installation
 

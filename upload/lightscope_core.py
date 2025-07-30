@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.12"
+ls_version = "1.0.13"
 
 print(f"ls_version: {ls_version}")
 
@@ -2472,6 +2472,65 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             except Exception as e:
                 print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
         
+        def try_bind_port(desired_port, max_attempts=10):
+            """
+            Try to bind to desired_port, and if it fails try nearby alternatives.
+            Returns (socket, actual_port) on success, or (None, None) on failure.
+            """
+            # List of ports to try - start with desired port, then nearby alternatives
+            ports_to_try = [desired_port]
+            
+            # Add nearby ports (±1, ±2, ±10, ±100)
+            for offset in [1, -1, 2, -2, 10, -10, 100, -100]:
+                candidate = desired_port + offset
+                if 1024 <= candidate <= 65535 and candidate not in ports_to_try:
+                    ports_to_try.append(candidate)
+            
+            # Add some random high ports as fallback
+            import random
+            currently_open = set(sockets.values())
+            available_random = [p for p in range(10000, 65536) 
+                              if p not in ports_to_try and p not in currently_open and p not in previously_opened_ports]
+            if available_random:
+                ports_to_try.extend(random.sample(available_random, min(5, len(available_random))))
+            
+            # Limit attempts
+            ports_to_try = ports_to_try[:max_attempts]
+            
+            for attempt, port in enumerate(ports_to_try):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind(("", port))
+                    s.listen()
+                    
+                    if port != desired_port:
+                        print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
+                    
+                    return s, port
+                    
+                except OSError as e:
+                    if e.errno == 98:  # EADDRINUSE - Address already in use
+                        if attempt == 0:  # Only log for the first (desired) port
+                            print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
+                        continue
+                    elif e.errno == 13:  # EACCES - Permission denied  
+                        if port < 1024:
+                            print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
+                            continue
+                        else:
+                            print(f"_honeypot_worker: Permission denied for port {port}: {e}", flush=True)
+                            continue
+                    else:
+                        print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                        continue
+                except Exception as e:
+                    print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                    continue
+            
+            print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
+            return None, None
+        
         # Define priority ports to open first
         priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
         
@@ -2487,25 +2546,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         
         print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
         
-        # Try to open initial ports
-        for port in initial_ports:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(("", port))
-                s.listen()
-                sockets[s] = port
-                previously_opened_ports.add(port)  # Track this port in history
-                print(f"_honeypot_worker: Initial startup port {port} opened successfully", flush=True)
-            except Exception as e:
-                print(f"_honeypot_worker: Failed to open initial port {port}: {e}", flush=True)
-                import os
-                try:
-                    print(f"_honeypot_worker: Running as UID {os.getuid()}, GID {os.getgid()}", flush=True)
-                except:
-                    print(f"_honeypot_worker: Could not get UID/GID", flush=True)
-                if port < 1024:
-                    print(f"_honeypot_worker: Port {port} < 1024 requires root or CAP_NET_BIND_SERVICE", flush=True)
+        # Try to open initial ports with retry logic
+        for desired_port in initial_ports:
+            s, actual_port = try_bind_port(desired_port)
+            if s and actual_port:
+                sockets[s] = actual_port
+                previously_opened_ports.add(actual_port)  # Track this port in history
+                print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
+            else:
+                print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
         
         # Update shared memory with initial ports
         print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
@@ -2775,18 +2824,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             except: pass
                             print(f"_honeypot_worker: Closed port {port}", flush=True)
                 
-                # Open new ports  
-                for port in to_open:
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(("", port))
-                        s.listen()
-                        sockets[s] = port
-                        previously_opened_ports.add(port)  # Track this port in history
-                        print(f"_honeypot_worker: Auto-opened port {port}", flush=True)
-                    except Exception as e:
-                        print(f"_honeypot_worker: Failed to auto-open port {port}: {e}", flush=True)
+                # Open new ports with retry logic
+                for desired_port in to_open:
+                    s, actual_port = try_bind_port(desired_port)
+                    if s and actual_port:
+                        sockets[s] = actual_port
+                        previously_opened_ports.add(actual_port)  # Track this port in history
+                        print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
+                    else:
+                        print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
 
                 update_shared_honeypot_ports()
                 interface_port_counts.clear()  # Reset for next cycle
@@ -2821,8 +2867,14 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             # Handle old format for compatibility
                             interface_port_counts["unknown"] = data.copy()
                             interface_names.add("unknown")
+                    except (BrokenPipeError, EOFError, ConnectionResetError) as e:
+                        # These errors are expected during updates when interface processes are terminated
+                        ###print(f"_honeypot_worker: Interface process communication error (likely during update): {e}", flush=True)
+                        pass  # Silently ignore these during normal operation
                     except Exception as e:
-                        print(f"_honeypot_worker: Error processing port count data: {e}", flush=True)
+                        print(f"_honeypot_worker: Error processing port count data: {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        print(f"_honeypot_worker: Full traceback: {traceback.format_exc()}", flush=True)
                 
                 # Check if we need to clear port history (after 7 days)
                 if now >= history_clear_time:
