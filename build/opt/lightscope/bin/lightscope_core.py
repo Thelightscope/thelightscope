@@ -37,6 +37,10 @@ benchmark_times=[]
 # Global watchdog notification function (set by runner)
 systemd_watchdog_notify = None
 
+# Global events set by the runner for communication
+runner_shutdown_event = None
+runner_update_event = None
+
 verbose=1
 if verbose == 0:
     logging.root.setLevel(logging.NOTSET)
@@ -2067,6 +2071,20 @@ def lightscope_run():
         while True:
             time.sleep(60)  # Check every 60 seconds instead of busy waiting
             
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating all interface processes for restart...")
+                # Terminate all interface processes
+                for iface, ctx in processes_per_interface.items():
+                    print(f"[+] Terminating processes for interface {iface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
+            
             new_mapping = choose_mac_linux_interface()
             old_ifaces = set(interfaces_and_ips)
             new_ifaces = set(new_mapping)
@@ -2210,6 +2228,20 @@ def lightscope_run():
         # --- monitor loop ---
         while True:
             time.sleep(60)
+
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating all interface processes for restart...")
+                # Terminate all interface processes
+                for iface, ctx in processes_per_interface.items():
+                    print(f"[+] Terminating processes for interface {iface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
 
             # Try to update external network information, but don't crash if it fails
             try:
