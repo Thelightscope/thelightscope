@@ -1,11 +1,11 @@
 {
-  "version": "1.0.9",
-  "sha256": "628c5315750df1285462a1ef8f4c58d9c012a835dc3f27d60d38d9337210cd91",
+  "version": "1.0.12",
+  "sha256": "a049b1494969e54f8f6adf90ad902b344b7166c3d5969fe75bb0265c1343ffb4",
   "filename": "lightscope_core.py",
   "download_url": "https://thelightscope.com/latest/lightscope_core.py",
   "signature_url": "https://thelightscope.com/latest/lightscope_core.py.sig",
   "public_key_url": "https://thelightscope.com/latest/public-key",
   "version_url": "https://thelightscope.com/latest/version",
-  "release_notes": "LightScope version 1.0.9",
+  "release_notes": "LightScope version 1.0.12",
   "minimum_runner_version": "1.0.0"
 }

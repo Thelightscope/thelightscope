@@ -31,8 +31,8 @@ if [ -n "$DB_NAME" ]; then
     echo "✅ Found your LightScope database name!"
     echo
     echo "🏷️  Database Name: $DB_NAME"
-    echo "🌐 Dashboard URL: https://thelightscope.com/tables/$DB_NAME"
-    echo "📋 Web Interface: https://thelightscope.com/tables"
+    echo "🌐 Dashboard URL: https://thelightscope.com/light_table/$DB_NAME"
+    echo "📋 Web Interface: https://thelightscope.com"
     echo
     echo "🔄 Service Status:"
     if pgrep -f "lightscope-runner" >/dev/null 2>&1; then

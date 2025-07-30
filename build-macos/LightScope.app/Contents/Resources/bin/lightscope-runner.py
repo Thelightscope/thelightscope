@@ -50,7 +50,7 @@ else:
     LOGS_DIR = LIGHTSCOPE_HOME / "logs"
     BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
-runner_version = "1.0.0"
+runner_version = "1.0.1"
 
 print(f"runner_version: {runner_version}")
 

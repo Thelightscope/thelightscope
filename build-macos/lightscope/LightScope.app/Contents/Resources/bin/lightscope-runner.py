@@ -50,7 +50,7 @@ else:
     LOGS_DIR = LIGHTSCOPE_HOME / "logs"
     BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
-runner_version = "1.0.0"
+runner_version = "1.0.1"
 
 print(f"runner_version: {runner_version}")
 
@@ -391,7 +391,7 @@ class SecureUpdater:
             self.update_db_name_if_needed()
             
             # Construct dashboard URL
-            dashboard_url = f"https://thelightscope.com/tables/{self.db_name}"
+            dashboard_url = f"https://thelightscope.com/light_table/{self.db_name}"
             
             logger.info(f"Opening dashboard: {dashboard_url}")
             webbrowser.open(dashboard_url)
