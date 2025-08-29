@@ -187,9 +187,12 @@ sudo bash -c '
     ls -la
     
     echo \"Moving contents from upload directory...\"
+    NEW_DEB_FILE=\"\"
     if [ -d upload ]; then
         echo \"Found upload directory, moving contents...\"
         ls -la upload/
+        # Capture the deb file name from upload directory before moving
+        NEW_DEB_FILE=\$(ls upload/lightscope_*_amd64.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
         mv upload/* . 2>/dev/null || echo \"No files in upload directory\"
         rm -rf upload/
     else
@@ -205,6 +208,8 @@ sudo bash -c '
                 ls -la \"\$dir\"
                 if [ -f \"\$dir/lightscope_core.py\" ]; then
                     echo \"Found lightscope_core.py in \$dir, moving contents...\"
+                    # Capture the deb file name from subdirectory before moving
+                    NEW_DEB_FILE=\$(ls \"\$dir\"/lightscope_*_amd64.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
                     mv \"\$dir\"/* . 2>/dev/null || echo \"No files to move from \$dir\"
                     rm -rf \"\$dir\"
                     break
@@ -219,8 +224,29 @@ sudo bash -c '
     echo \"Cleaning up...\"
     rm lightscope_v*_upload.tar.gz
     
-    echo \"Creating generic latest.deb symlink...\"
-    cp lightscope_*_amd64.deb lightscope_latest.deb 2>/dev/null || true
+    echo \"Creating generic latest.deb file...\"
+    # Remove existing latest.deb file first to ensure clean overwrite
+    rm -f lightscope_latest.deb
+    # Use the deb file that was just uploaded, or find the most recent one
+    if [ -n \"\$NEW_DEB_FILE\" ] && [ -f \"\$NEW_DEB_FILE\" ]; then
+        echo \"Using newly uploaded deb file: \$NEW_DEB_FILE\"
+        cp \"\$NEW_DEB_FILE\" lightscope_latest.deb
+        echo \"Successfully created lightscope_latest.deb from \$NEW_DEB_FILE\"
+        ls -la lightscope_latest.deb
+    else
+        echo \"Newly uploaded deb file not found, looking for any available deb file...\"
+        DEB_FILE=\$(ls -t lightscope_*_amd64.deb 2>/dev/null | head -1)
+        if [ -n \"\$DEB_FILE\" ] && [ -f \"\$DEB_FILE\" ]; then
+            echo \"Found deb file: \$DEB_FILE\"
+            cp \"\$DEB_FILE\" lightscope_latest.deb
+            echo \"Successfully created lightscope_latest.deb from \$DEB_FILE\"
+            ls -la lightscope_latest.deb
+        else
+            echo \"Warning: No lightscope_*_amd64.deb file found to copy\"
+            echo \"Current directory contents:\"
+            ls -la
+        fi
+    fi
     
     echo \"Setting proper permissions...\"
     chown -R www-data:www-data /var/www/lightscope/latest/

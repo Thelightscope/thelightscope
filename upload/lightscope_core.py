@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.13"
+ls_version = "1.0.15"
 
 print(f"ls_version: {ls_version}")
 
@@ -2370,11 +2370,26 @@ class configuration_reader:
         elif 'database' not in config['Settings'] or not config['Settings']['database'].strip():
             # Generate new database name only if not in environment and not in config
             today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-            max_len = 63                                   # leave room under 64
-            rand_len = max_len - len(today) - 1            # "-1" for the underscore
-            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-            config['Settings']['database'] = f"{today}_{rand_part}"
-            print(f"Database not found; generated random database name: {config['Settings']['database']}")
+            
+            # Check if GreyNoise mode is enabled by presence of .greynoise file
+            greynoise_paths = ["/tmp/.greynoise", "/opt/lightscope/.greynoise", 
+                             os.path.expanduser("~/.greynoise")]
+            is_greynoise = any(os.path.exists(path) for path in greynoise_paths)
+            
+            if is_greynoise:
+                # For GreyNoise: gn + date + 45 random chars (total 56 chars: 2+8+1+45)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 3        # "-3" for "gn" and underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"gn{today}_{rand_part}"
+                print(f"Database not found; generated GreyNoise database name: {config['Settings']['database']}")
+            else:
+                # Standard format: date + 47 random chars (total 56 chars: 8+1+47)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 1        # "-1" for the underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"{today}_{rand_part}"
+                print(f"Database not found; generated random database name: {config['Settings']['database']}")
         else:
             # Use existing database name from config file
             print(f"Using existing database name from config: {config['Settings']['database']}")

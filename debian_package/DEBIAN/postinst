@@ -66,9 +66,22 @@ echo "ℹ️  Network capabilities managed by systemd service (AmbientCapabiliti
 # Generate unique database name during installation
 echo "Generating unique database name..."
 TODAY=$(date +%Y%m%d)
-RAND_PART=$(cat /dev/urandom | tr -dc 'a-z' | head -c 47)
-DB_NAME="${TODAY}_${RAND_PART}"
-echo "✅ Generated database name: $DB_NAME"
+
+# Check if GreyNoise mode is enabled by presence of .greynoise file
+# Check multiple locations including common user directories
+if [ -f "/tmp/.greynoise" ] || [ -f "/opt/lightscope/.greynoise" ] || [ -f "$HOME/.greynoise" ] || \
+   [ -f "/home/ubuntu/.greynoise" ] || [ -f "/home/admin/.greynoise" ] || [ -f "/root/.greynoise" ]; then
+    echo "GreyNoise mode detected - using 'gn' prefix for database name"
+    # For GreyNoise: gn + date + 45 random chars (total 56 chars: 2+8+1+45)
+    RAND_PART=$(cat /dev/urandom | tr -dc 'a-z' | head -c 45)
+    DB_NAME="gn${TODAY}_${RAND_PART}"
+    echo "✅ Generated GreyNoise database name: $DB_NAME"
+else
+    # Standard format: date + 47 random chars (total 56 chars: 8+1+47)
+    RAND_PART=$(cat /dev/urandom | tr -dc 'a-z' | head -c 47)
+    DB_NAME="${TODAY}_${RAND_PART}"
+    echo "✅ Generated standard database name: $DB_NAME"
+fi
 
 # Copy configuration files and pre-populate with generated database name
 if [ ! -f "$LIGHTSCOPE_HOME/config/config.ini" ]; then
