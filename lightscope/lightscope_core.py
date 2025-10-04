@@ -59,6 +59,25 @@ elif verbose == 2:
 # Global memory management constant
 MAX_SIZE = 100000  # Maximum size for all deques, queues, and collections
 
+# Memory monitoring for container environments
+def check_memory_usage():
+    """Check if we're approaching memory limits in containerized environments"""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        
+        # If in container and approaching limit, trigger graceful shutdown
+        container_memory_limit = os.environ.get('CONTAINER_MEMORY_LIMIT_MB')
+        if container_memory_limit:
+            limit_mb = int(container_memory_limit)
+            if memory_mb > limit_mb * 0.9:  # 90% of limit
+                print(f"Memory usage {memory_mb:.1f}MB approaching container limit {limit_mb}MB")
+                return True
+        return False
+    except Exception:
+        return False
+
 # packet_info.py
 import dpkt
 import datetime
@@ -1250,6 +1269,12 @@ class Ports:
         while True:
 
             now = time.monotonic()
+            
+            # Check memory usage in containerized environments
+            if check_memory_usage():
+                print("Memory limit approaching, initiating graceful shutdown for restart...")
+                self.clear_and_report_all_watched_packets()
+                return  # Exit gracefully to trigger container restart
             
             # Send systemd watchdog notification (if available)
             if systemd_watchdog_notify:
