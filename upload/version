@@ -1,6 +1,6 @@
 {
   "version": "1.0.15",
-  "sha256": "3b967d354008a866b4a3e0bfde1d77808eb818e326299673b262785f665cc3d8",
+  "sha256": "deae1eb4f6d853fe4817ba3ff5fda9781ca5c163c9584beb3a934bd4133a4abb",
   "filename": "lightscope_core.py",
   "download_url": "https://thelightscope.com/latest/lightscope_core.py",
   "signature_url": "https://thelightscope.com/latest/lightscope_core.py.sig",
