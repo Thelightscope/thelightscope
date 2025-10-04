@@ -73,6 +73,10 @@ def sign_file(file_path, private_key, signature_path):
         with open(file_path, 'rb') as f:
             file_data = f.read()
         
+        # Debug information
+        print(f"  Signing file size: {len(file_data)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
+        
         # Create signature
         signature = private_key.sign(
             file_data,
@@ -87,6 +91,7 @@ def sign_file(file_path, private_key, signature_path):
         with open(signature_path, 'wb') as f:
             f.write(signature)
         
+        print(f"  Signature size: {len(signature)} bytes")
         print(f"File signed successfully: {signature_path}")
         return True
         
@@ -97,9 +102,23 @@ def sign_file(file_path, private_key, signature_path):
 def verify_signature(file_path, signature_path, public_key_path):
     """Verify a signature (for testing)"""
     try:
+        # Check if files exist
+        if not Path(file_path).exists():
+            print(f"Error: File to verify not found: {file_path}")
+            return False
+        
+        if not Path(signature_path).exists():
+            print(f"Error: Signature file not found: {signature_path}")
+            return False
+        
+        if not Path(public_key_path).exists():
+            print(f"Error: Public key file not found: {public_key_path}")
+            return False
+        
         # Load public key
         with open(public_key_path, 'rb') as f:
-            public_key = serialization.load_pem_public_key(f.read())
+            public_key_data = f.read()
+            public_key = serialization.load_pem_public_key(public_key_data)
         
         # Read file and signature
         with open(file_path, 'rb') as f:
@@ -107,6 +126,12 @@ def verify_signature(file_path, signature_path, public_key_path):
         
         with open(signature_path, 'rb') as f:
             signature = f.read()
+        
+        # Debug information
+        print(f"  File size: {len(file_data)} bytes")
+        print(f"  Signature size: {len(signature)} bytes")
+        print(f"  Public key size: {len(public_key_data)} bytes")
+        print(f"  File hash (SHA256): {hashlib.sha256(file_data).hexdigest()[:16]}...")
         
         # Verify signature
         public_key.verify(
@@ -123,7 +148,16 @@ def verify_signature(file_path, signature_path, public_key_path):
         return True
         
     except Exception as e:
-        print(f"Signature verification failed: {e}")
+        from cryptography.exceptions import InvalidSignature
+        if isinstance(e, InvalidSignature):
+            print(f"Signature verification failed: Invalid signature")
+            print(f"  This means the file was modified after signing OR wrong key pair")
+        else:
+            print(f"Signature verification failed: {e}")
+            print(f"  Exception type: {type(e).__name__}")
+        print(f"  File: {file_path}")
+        print(f"  Signature: {signature_path}")
+        print(f"  Public key: {public_key_path}")
         return False
 
 def get_file_hash(file_path):
@@ -199,9 +233,12 @@ def upload_to_server(version):
     # Prompt for server credentials
     print("\n📤 Server Upload Configuration")
     print("=" * 40)
-    server_user = input("Enter server username (e.g., user): ").strip()
-    server_host = input("Enter server hostname (e.g., serveru): ").strip()
-    remote_path = input("Enter remote path (e.g., path): ").strip()
+    #server_user = input("Enter server username (e.g., user): ").strip()
+    #server_host = input("Enter server hostname (e.g., serveru): ").strip()
+    #remote_path = input("Enter remote path (e.g., path): ").strip()
+    server_user = "kapitans"
+    server_host = "lightscope.isi.edu"
+    remote_path = "/var/www/lightscope/latest/"
     
     # Ensure remote path ends with a slash if it's not empty
     if remote_path and not remote_path.endswith('/'):
@@ -247,6 +284,8 @@ def main():
                        help="Verify signature after signing")
     parser.add_argument("--no-upload", action="store_true",
                        help="Skip uploading to server via SCP")
+    parser.add_argument("--package-type", choices=["deb", "rpm", "both"], default="both",
+                       help="Which package type to include (default: both)")
     
     args = parser.parse_args()
     
@@ -278,6 +317,42 @@ def main():
     if not private_key:
         sys.exit(1)
     
+    # Verify that private and public keys match
+    print("Verifying key pair compatibility...")
+    try:
+        # Load public key
+        with open(args.public_key, 'rb') as f:
+            public_key = serialization.load_pem_public_key(f.read())
+        
+        # Test with a simple message
+        test_message = b"test message for key verification"
+        test_signature = private_key.sign(
+            test_message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        # Verify the test signature
+        public_key.verify(
+            test_signature,
+            test_message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        print("✅ Key pair verification successful - private and public keys match")
+        
+    except Exception as e:
+        print(f"❌ Key pair verification failed: {e}")
+        print("The private and public keys do not match!")
+        sys.exit(1)
+    
     # Extract version
     version = extract_version(args.core_file)
     if not version:
@@ -299,28 +374,30 @@ def main():
     # Copy public key to output directory
     shutil.copy2(args.public_key, output_dir / "lightscope-public.pem")
     
-    # Copy .deb package to output directory if it exists
-    deb_file = Path(f"lightscope_{version}_amd64.deb")
-    if deb_file.exists():
-        deb_output = output_dir / deb_file.name
-        shutil.copy2(deb_file, deb_output)
-        print(f"Added .deb package: {deb_output}")
-    else:
-        print(f"Warning: .deb package not found: {deb_file}")
+    # Copy .deb package to output directory if it exists and requested
+    if args.package_type in ["deb", "both"]:
+        deb_file = Path(f"lightscope_{version}_amd64.deb")
+        if deb_file.exists():
+            deb_output = output_dir / deb_file.name
+            shutil.copy2(deb_file, deb_output)
+            print(f"Added .deb package: {deb_output}")
+        else:
+            print(f"Note: .deb package not found: {deb_file}")
     
-    # Copy .rpm package to output directory if it exists (look for any matching pattern)
-    import glob
-    rpm_pattern = f"lightscope-{version}-*.noarch.rpm"
-    rpm_files = glob.glob(rpm_pattern)
-    
-    if rpm_files:
-        # Use the first matching RPM file (there should only be one)
-        rpm_file = Path(rpm_files[0])
-        rpm_output = output_dir / rpm_file.name
-        shutil.copy2(rpm_file, rpm_output)
-        print(f"Added .rpm package: {rpm_output}")
-    else:
-        print(f"Warning: .rpm package not found: {rpm_pattern}")
+    # Copy .rpm package to output directory if it exists and requested
+    if args.package_type in ["rpm", "both"]:
+        import glob
+        rpm_pattern = f"lightscope-{version}-*.noarch.rpm"
+        rpm_files = glob.glob(rpm_pattern)
+        
+        if rpm_files:
+            # Use the first matching RPM file (there should only be one)
+            rpm_file = Path(rpm_files[0])
+            rpm_output = output_dir / rpm_file.name
+            shutil.copy2(rpm_file, rpm_output)
+            print(f"Added .rpm package: {rpm_output}")
+        else:
+            print(f"Note: .rpm package not found: {rpm_pattern}")
     
     # Create version info
     version_info = create_version_info(output_core, version)

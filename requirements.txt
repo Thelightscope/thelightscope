@@ -1,0 +1,32 @@
+# LightScope Container Requirements
+# Python dependencies for containerized deployment
+
+# Core system monitoring
+psutil>=5.9.0
+
+# Network packet capture (Linux)
+python-libpcap==0.5.2
+
+# HTTP requests and networking
+requests==2.32.3
+urllib3==2.2.3
+
+# Packaging utilities
+packaging
+
+# Network packet analysis
+scapy==2.6.1
+dpkt==1.9.8
+
+# Container and systemd integration
+systemd-python>=235
+
+# Cryptography for secure updates
+cryptography>=3.4.8
+
+# Configuration file parsing
+configparser
+
+# Additional utilities for containers
+python-dateutil
+pytz

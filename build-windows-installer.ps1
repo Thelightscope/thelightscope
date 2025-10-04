@@ -52,19 +52,43 @@ function Test-Dependencies {
     }
     
     # Check required Python packages
-    $RequiredPackages = @("cryptography", "psutil", "requests", "dpkt", "pywin32")
-    foreach ($Package in $RequiredPackages) {
+    $RequiredPackages = @(
+        @("cryptography", "cryptography"),
+        @("psutil", "psutil"),
+        @("requests", "requests"),
+        @("dpkt", "dpkt"),
+        @("pywin32", "pywintypes"),  # Install pywin32 but test pywintypes
+        @("wmi", "wmi"),
+        @("pystray", "pystray"),
+        @("Pillow", "PIL")
+    )
+    
+    foreach ($PackageInfo in $RequiredPackages) {
+        $InstallName = $PackageInfo[0]
+        $ImportName = $PackageInfo[1]
+        
         try {
-            python -c "import $Package" 2>$null
+            python -c "import $ImportName" 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-ColoredOutput "OK Python package found: $Package" "Green"
+                Write-ColoredOutput "OK Python package found: $InstallName" "Green"
             } else {
-                Write-ColoredOutput "Warning: Python package missing: $Package" "Yellow"
-                Write-ColoredOutput "Installing $Package..." "Yellow"
-                python -m pip install $Package
+                Write-ColoredOutput "Warning: Python package missing: $InstallName" "Yellow"
+                Write-ColoredOutput "Installing $InstallName..." "Yellow"
+                python -m pip install $InstallName
+                
+                # If we just installed pywin32, run its post-install registration
+                if ($InstallName -eq "pywin32") {
+                    Write-ColoredOutput "Running pywin32 post-install..." "Yellow"
+                    python -m pywin32_postinstall -install
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-ColoredOutput "OK pywin32 post-install completed successfully" "Green"
+                    } else {
+                        Write-ColoredOutput "Warning: pywin32 post-install failed" "Yellow"
+                    }
+                }
             }
         } catch {
-            Write-ColoredOutput "Warning: Could not check Python package: $Package" "Yellow"
+            Write-ColoredOutput "Warning: Could not check Python package: $InstallName" "Yellow"
         }
     }
 }
@@ -84,41 +108,37 @@ function Clean-BuildDirectory {
 function Prepare-BuildFiles {
     Write-ColoredOutput "=== Preparing Build Files ===" "Yellow"
     
-    # Create build directory
-    if (-not (Test-Path $BuildDir)) {
-        New-Item -ItemType Directory -Path $BuildDir | Out-Null
-    }
-    if (-not (Test-Path $OutputDir)) {
-        New-Item -ItemType Directory -Path $OutputDir | Out-Null
-    }
-    
-    # Copy core files
-    $CoreFiles = @(
-        "lightscope\lightscope_core.py",
-        "lightscope-service-windows.py",
-        "lightscope-runner-windows.py",
-        "lightscope-installer.nsi"
+    # Debug output
+    Write-ColoredOutput "Script directory: $ScriptDir" "Cyan"
+    Write-ColoredOutput "Build directory: $BuildDir" "Cyan"
+    Write-ColoredOutput "Output directory: $OutputDir" "Cyan"
+
+    # Make sure build & output dirs exist
+    New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+
+    # Define all required files with their correct source paths
+    $filesToCopy = @(
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope\lightscope_core.py'); name = 'lightscope_core.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope\lightscope-runner-windows.py'); name = 'lightscope-runner-windows.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'install-missing-dependencies.py'); name = 'install-missing-dependencies.py'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'README-INSTALLATION.md'); name = 'README-INSTALLATION.md'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-installer.nsi'); name = 'lightscope-installer.nsi'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'lightscope-public.pem'); name = 'lightscope-public.pem'},
+        @{src = (Join-Path -Path $ScriptDir -ChildPath 'ls.png'); name = 'ls.png'}
     )
-    
-    foreach ($File in $CoreFiles) {
-        $SourcePath = Join-Path $ScriptDir $File
-        $DestPath = Join-Path $BuildDir (Split-Path $File -Leaf)
-        
-        if (Test-Path $SourcePath) {
-            Copy-Item $SourcePath $DestPath
-            Write-ColoredOutput "OK Copied: $File" "Green"
+
+    # Copy all required files
+    foreach ($file in $filesToCopy) {
+        if (Test-Path -Path $file.src) {
+            $dest = Join-Path -Path $BuildDir -ChildPath $file.name
+            Copy-Item -LiteralPath $file.src -Destination $dest -Force
+            Write-ColoredOutput "OK Copied: $($file.name)" "Green"
         } else {
-            Write-ColoredOutput "Warning: File not found: $File" "Yellow"
+            Write-ColoredOutput "ERROR: Required file not found: $($file.src)" "Red"
+            Write-ColoredOutput "This file is required for building the installer." "Red"
+            exit 1
         }
-    }
-    
-    # Copy public key if it exists
-    $PublicKeyPath = Join-Path $ScriptDir "lightscope-public.pem"
-    if (Test-Path $PublicKeyPath) {
-        Copy-Item $PublicKeyPath $BuildDir
-        Write-ColoredOutput "OK Copied: lightscope-public.pem" "Green"
-    } else {
-        Write-ColoredOutput "Warning: Public key not found - updates may not work" "Yellow"
     }
     
     # Create license file if it doesn't exist
@@ -169,7 +189,7 @@ function Build-Installer {
     Get-ChildItem $BuildDir | ForEach-Object { Write-ColoredOutput "  - $($_.Name)" "White" }
     
     # Build installer
-    $InstallerPath = Join-Path $OutputDir "LightScope-$Version-Setup.exe"
+    $InstallerPath = Join-Path $OutputDir "lightscope_latest.exe"
     $NSISArgs = @("/DOUTFILE=`"$InstallerPath`"", "`"$NSISScript`"")
     
     # Ensure output directory exists
@@ -215,11 +235,15 @@ function Build-Installer {
     }
     
     if ($Process.ExitCode -eq 0) {
-        # NSIS creates the file in the build directory, we need to move it to output directory
-        $ActualInstallerPath = Join-Path $BuildDir "LightScope-$Version-Setup.exe"
+        # NSIS creates the file in the build directory, find whatever file was actually created
+        $CreatedExeFiles = Get-ChildItem $BuildDir -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*LightScope*" }
         
-        if (Test-Path $ActualInstallerPath) {
-            # Move the installer to the correct output location
+        if ($CreatedExeFiles.Count -gt 0) {
+            # Use the first (and likely only) installer file found
+            $ActualInstallerPath = $CreatedExeFiles[0].FullName
+            Write-ColoredOutput "Found installer: $($CreatedExeFiles[0].Name)" "Cyan"
+            
+            # Move and rename the installer to the correct output location
             Move-Item $ActualInstallerPath $InstallerPath -Force
             Write-ColoredOutput "OK Installer built successfully: $(Split-Path $InstallerPath -Leaf)" "Green"
             
@@ -229,8 +253,7 @@ function Build-Installer {
             
             return $InstallerPath
         } else {
-            Write-ColoredOutput "Error: NSIS compiled successfully but installer not found at expected location" "Red"
-            Write-ColoredOutput "Expected at: $ActualInstallerPath" "Red"
+            Write-ColoredOutput "Error: NSIS compiled successfully but no installer exe found" "Red"
             Write-ColoredOutput "Looking for files in build directory:" "Red"
             Get-ChildItem $BuildDir -Filter "*.exe" | ForEach-Object { 
                 Write-ColoredOutput "  Found: $($_.Name)" "Yellow" 
@@ -345,7 +368,6 @@ function Create-DistributionPackage {
     
     # Copy core files for manual installation
     Copy-Item (Join-Path $BuildDir "lightscope_core.py") $DistributionDir
-    Copy-Item (Join-Path $BuildDir "lightscope-service-windows.py") $DistributionDir
     Copy-Item (Join-Path $BuildDir "lightscope-runner-windows.py") $DistributionDir
     
     # Copy public key
@@ -367,29 +389,36 @@ LightScope Windows Installation Instructions
 ==========================================
 
 AUTOMATIC INSTALLATION (Recommended):
-1. Run LightScope-$Version-Setup.exe as Administrator
+1. Run lightscope_latest.exe as Administrator
 2. Follow the installation wizard
-3. The service will start automatically
+3. LightScope will start automatically in the background
 
 MANUAL INSTALLATION:
 1. Install Python 3.8+ from https://python.org/
 2. Install Npcap from https://nmap.org/npcap/
 3. Install required Python packages:
    pip install cryptography psutil requests dpkt pywin32
-4. Copy all .py files to C:\Program Files\LightScope\bin\
-5. Run as Administrator:
-   python lightscope-service-windows.py install
-   python lightscope-service-windows.py start
+4. Copy all .py files to desired location (e.g., C:\LightScope\)
+5. Run:
+   python lightscope-runner-windows.py
 
-SERVICE MANAGEMENT:
-- Start:   python lightscope-service-windows.py start
-- Stop:    python lightscope-service-windows.py stop
-- Restart: python lightscope-service-windows.py restart
-- Status:  sc query LightScope
+USER MODE OPERATION:
+- The software runs as a user-level application in a virtual environment
+- No administrator privileges required
+- Automatically starts with Windows login (background mode)
+- Virtual environment is activated automatically
+- No visible command prompt window
+
+RUNNING LIGHTSCOPE:
+- Background mode (default): start-lightscope-background.bat
+- Debug mode (visible window): start-lightscope.bat
+- Both launchers located in: %LOCALAPPDATA%\LightScope\
+- Start Menu shortcuts available for management
+- Desktop shortcut is optional (unchecked by default)
 
 LOGS:
-- Service logs: C:\Program Files\LightScope\logs\
-- Windows Event Log: Windows Logs > Application
+- Application logs: %LOCALAPPDATA%\LightScope\logs\
+- Installation log: %LOCALAPPDATA%\LightScope\lightscope-installation.log
 
 UNINSTALL:
 - Use Add/Remove Programs or
@@ -406,8 +435,121 @@ For support, visit: https://thelightscope.com/
     Write-ColoredOutput "OK Distribution package created: $(Split-Path $ArchivePath -Leaf)" "Green"
 }
 
-function Show-Summary {
+function Test-SSHTools {
+    Write-ColoredOutput "=== Checking SSH Tools ===" "Yellow"
+    
+    # Check if OpenSSH is available (comes with Windows 10/11)
+    try {
+        $sshVersion = ssh -V 2>&1
+        Write-ColoredOutput "OK SSH found: $sshVersion" "Green"
+    } catch {
+        Write-ColoredOutput "Error: SSH not found" "Red"
+        Write-ColoredOutput "Please install OpenSSH or use Git Bash" "Red"
+        return $false
+    }
+    
+    try {
+        $scpVersion = scp -V 2>&1
+        Write-ColoredOutput "OK SCP found: $scpVersion" "Green"
+    } catch {
+        Write-ColoredOutput "Error: SCP not found" "Red"
+        Write-ColoredOutput "Please install OpenSSH or use Git Bash" "Red"
+        return $false
+    }
+    
+    return $true
+}
+
+function Upload-Installer {
     param([string]$InstallerPath)
+    
+    Write-ColoredOutput "=== Uploading to Server ===" "Yellow"
+    
+    if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
+        Write-ColoredOutput "Error: Installer not found - skipping upload" "Red"
+        return $false
+    }
+    
+    # Test SSH tools
+    if (-not (Test-SSHTools)) {
+        Write-ColoredOutput "Error: SSH tools not available - skipping upload" "Red"
+        return $false
+    }
+    
+    $ServerUser = "kapitans"
+    $ServerHost = "lightscope.isi.edu"
+    $TempPath = "/tmp/"
+    $FinalPath = "/var/www/lightscope/latest/"
+    $InstallerName = Split-Path $InstallerPath -Leaf
+    
+    Write-ColoredOutput "Uploading $InstallerName to $ServerUser@$ServerHost..." "Cyan"
+    
+    # Step 1: SCP upload to /tmp
+    Write-ColoredOutput "Step 1: Uploading to /tmp..." "Cyan"
+    try {
+        $scpArgs = @($InstallerPath, "$ServerUser@$ServerHost`:$TempPath")
+        $scpProcess = Start-Process -FilePath "scp" -ArgumentList $scpArgs -NoNewWindow -Wait -PassThru
+        
+        if ($scpProcess.ExitCode -eq 0) {
+            Write-ColoredOutput "OK File uploaded to /tmp successfully" "Green"
+        } else {
+            Write-ColoredOutput "Error: SCP upload failed with exit code $($scpProcess.ExitCode)" "Red"
+            return $false
+        }
+    } catch {
+        Write-ColoredOutput "Error: SCP upload failed: $($_.Exception.Message)" "Red"
+        return $false
+    }
+    
+    # Step 2: Move file from /tmp to final location
+    Write-ColoredOutput "Step 2: Moving file to final location..." "Cyan"
+    Write-ColoredOutput "Note: You will be prompted for your password to run sudo" "Yellow"
+    try {
+        $moveCommand = "sudo mv $TempPath$InstallerName $FinalPath"
+        $userHost = "$ServerUser@$ServerHost"
+        $sshArgs = @("-t", $userHost, $moveCommand)
+        
+        Write-ColoredOutput "Executing: ssh -t $userHost '$moveCommand'" "Cyan"
+        
+        # Use Start-Process with -Wait to allow interactive password entry
+        $sshProcess = Start-Process -FilePath "ssh" -ArgumentList $sshArgs -NoNewWindow -Wait -PassThru
+        
+        if ($sshProcess.ExitCode -eq 0) {
+            Write-ColoredOutput "OK File moved to $FinalPath successfully" "Green"
+        } else {
+            Write-ColoredOutput "Error: SSH move command failed with exit code $($sshProcess.ExitCode)" "Red"
+            Write-ColoredOutput "Trying alternative approach..." "Yellow"
+            
+            # Alternative: Try with explicit shell command
+            $altCommand = "bash -c 'sudo mv $TempPath$InstallerName $FinalPath'"
+            $altSshArgs = @("-t", $userHost, $altCommand)
+            Write-ColoredOutput "Executing: ssh -t $userHost '$altCommand'" "Cyan"
+            $altSshProcess = Start-Process -FilePath "ssh" -ArgumentList $altSshArgs -NoNewWindow -Wait -PassThru
+            
+            if ($altSshProcess.ExitCode -eq 0) {
+                Write-ColoredOutput "OK File moved to $FinalPath successfully (alternative method)" "Green"
+            } else {
+                Write-ColoredOutput "Error: Both SSH move attempts failed" "Red"
+                Write-ColoredOutput "Manual commands to complete the deployment:" "Yellow"
+                Write-ColoredOutput "  ssh -t $userHost 'sudo mv $TempPath$InstallerName $FinalPath'" "Yellow"
+                return $false
+            }
+        }
+    } catch {
+        Write-ColoredOutput "Error: SSH move failed: $($_.Exception.Message)" "Red"
+        Write-ColoredOutput "Manual commands to complete the deployment:" "Yellow"
+        Write-ColoredOutput "  ssh -t $userHost 'sudo mv $TempPath$InstallerName $FinalPath'" "Yellow"
+        return $false
+    }
+    
+    Write-ColoredOutput "OK Installer successfully deployed to server!" "Green"
+    Write-ColoredOutput "Download URL: https://lightscope.isi.edu/latest/lightscope_latest.exe" "Cyan"
+    
+    return $true
+}
+
+function Show-Summary {
+    param([string]$InstallerPath, [bool]$UploadSuccess = $false)
     
     $Version = Get-Version
     
@@ -427,31 +569,59 @@ function Show-Summary {
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "Files created in windows-output/:" "White"
     if ($InstallerExists) {
-        Write-ColoredOutput "  1. LightScope-$Version-Setup.exe ($($InstallerSize) MB) - Windows Installer" "White"
+        Write-ColoredOutput "  1. lightscope_latest.exe ($($InstallerSize) MB) - Windows Installer" "White"
     } else {
-        Write-ColoredOutput "  1. LightScope-$Version-Setup.exe - FAILED TO CREATE" "Red"
+        Write-ColoredOutput "  1. lightscope_latest.exe - FAILED TO CREATE" "Red"
     }
     Write-ColoredOutput "  2. lightscope_v$Version`_windows.zip - Complete distribution package" "White"
     Write-ColoredOutput "" "White"
+    
+    if ($UploadSuccess) {
+        Write-ColoredOutput "SERVER DEPLOYMENT:" "Cyan"
+        Write-ColoredOutput "============================================" "Cyan"
+        Write-ColoredOutput "" "White"
+        Write-ColoredOutput "✓ Installer uploaded to server successfully" "Green"
+        Write-ColoredOutput "✓ Available at: https://lightscope.isi.edu/latest/lightscope_latest.exe" "Green"
+        Write-ColoredOutput "" "White"
+    } else {
+        Write-ColoredOutput "SERVER DEPLOYMENT:" "Cyan"
+        Write-ColoredOutput "============================================" "Cyan"
+        Write-ColoredOutput "" "White"
+        Write-ColoredOutput "✗ Installer upload failed or was skipped" "Red"
+        Write-ColoredOutput "Manual upload required:" "Yellow"
+        Write-ColoredOutput "  scp lightscope_latest.exe kapitans@lightscope.isi.edu:/tmp/" "Yellow"
+        Write-ColoredOutput "  ssh kapitans@lightscope.isi.edu 'sudo mv /tmp/lightscope_latest.exe /var/www/lightscope/latest/'" "Yellow"
+        Write-ColoredOutput "" "White"
+    }
+    
     Write-ColoredOutput "DEPLOYMENT INSTRUCTIONS:" "Cyan"
     Write-ColoredOutput "============================================" "Cyan"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR END USERS:" "Yellow"
-    Write-ColoredOutput "- Download and run LightScope-$Version-Setup.exe as Administrator" "White"
-    Write-ColoredOutput "- The installer will check dependencies and install the service" "White"
+    Write-ColoredOutput "- Download and run lightscope_latest.exe as Administrator" "White"
+    Write-ColoredOutput "- The installer creates a virtual environment and installs dependencies" "White"
+    Write-ColoredOutput "- LightScope runs in the virtual environment automatically (background mode)" "White"
+    Write-ColoredOutput "- No visible command prompt window - runs silently in background" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "FOR DISTRIBUTION:" "Yellow"
-    Write-ColoredOutput "- Upload LightScope-$Version-Setup.exe to your download server" "White"
-    Write-ColoredOutput "- Update your website download links" "White"
+    if ($UploadSuccess) {
+        Write-ColoredOutput "- Installer is already available at: https://lightscope.isi.edu/latest/lightscope_latest.exe" "White"
+        Write-ColoredOutput "- No need to update download links - same URL every time!" "White"
+    } else {
+        Write-ColoredOutput "- Upload lightscope_latest.exe to your download server" "White"
+        Write-ColoredOutput "- Update your website download links" "White"
+    }
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "TESTING:" "Cyan"
     Write-ColoredOutput "============================================" "Cyan"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "Test the installer on a clean Windows system:" "White"
     Write-ColoredOutput "1. Run installer as Administrator" "White"
-    Write-ColoredOutput "2. Check service status: sc query LightScope" "White"
-    Write-ColoredOutput "3. View logs: dir `"C:\Program Files\LightScope\logs`"" "White"
-    Write-ColoredOutput "4. Test uninstall from Add/Remove Programs" "White"
+    Write-ColoredOutput "2. Check virtual environment: dir `"%LOCALAPPDATA%\LightScope\venv`"" "White"
+    Write-ColoredOutput "3. Test background launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope-background.bat`"" "White"
+    Write-ColoredOutput "4. Test debug launcher: `"%LOCALAPPDATA%\LightScope\start-lightscope.bat`"" "White"
+    Write-ColoredOutput "5. View logs: dir `"%LOCALAPPDATA%\LightScope\logs`"" "White"
+    Write-ColoredOutput "6. Test uninstall from Add/Remove Programs" "White"
     Write-ColoredOutput "" "White"
     Write-ColoredOutput "SUCCESS: Windows package ready for distribution!" "Green"
 }
@@ -493,7 +663,11 @@ try {
     Create-DistributionPackage -InstallerPath $InstallerPath
     
     Write-ColoredOutput "" "White"
-    Show-Summary -InstallerPath $InstallerPath
+    Write-ColoredOutput "7. Uploading to server..." "Yellow"
+    $UploadSuccess = Upload-Installer -InstallerPath $InstallerPath
+    
+    Write-ColoredOutput "" "White"
+    Show-Summary -InstallerPath $InstallerPath -UploadSuccess $UploadSuccess
     
 } catch {
     Write-ColoredOutput "Error: $($_.Exception.Message)" "Red"

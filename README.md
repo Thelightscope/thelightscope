@@ -1,32 +1,83 @@
-# LightScope
+# LightScope for macOS v1.0.3
 
-Smart attackers scan with one IP, strike with another—and evade honeypots.  
-**LightScope** exposes the real threat by linking scans to attacks on live production systems.
+## Installation
 
----
+1. Run the installation script:
+   ```
+   ./install.sh
+   ```
 
-## How It Works
+2. When prompted, allow the BPF permissions setup for packet capture
 
-**Deceive. Discover. Defend.**
+3. LightScope will start automatically and run in the background
 
-- **Deceive**  
-  Feed tailored misinformation to different scanners—show one attacker an open port, hide it from another.
+## Network Monitoring
 
-- **Discover**  
-  Track who takes the bait to uncover relationships between scanning and attacking IPs.
+LightScope monitors network traffic using the Berkeley Packet Filter (BPF). This requires special permissions but does NOT require running as root.
 
-- **Defend**  
-  Block the real attacker infrastructure, not just the disposable scanning IPs.
+### First-time Setup
 
+The installer will offer to run the BPF permissions setup script:
+```
+sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh
+```
 
+This one-time setup:
+- Creates an 'access_bpf' group
+- Adds you to the group
+- Sets up automatic BPF permissions at boot
+- Allows packet capture without root privileges
 
+### Manual BPF Setup
 
+If you skipped the setup during installation, you can run it later:
+```
+sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh
+```
 
-# Academic Description
-LightScope is a cybersecurity research project that examines unwanted traffic from attackers and scanners on the internet. LightScope is different from existing solutions as it turns closed ports on live machines into an network telescopes and can forward attacker traffic to a USC managed honeypot. It deliberately feeds false information to some scanners and not others in order to map the relationships between who knew something was open and who later showed up to attack it. The LightScope client is free, open source, extremely lightweight, and designed to run on production machines. If you install it you will be provided with rich information about who’s targeting your network and tailored IP blocklists you can use to keep your network safe. 
+## Configuration
 
-LightScope is based upon work supported by the U.S. National Science Foundation under Grant No. 2313998 and the University of Southern California Information Sciences Institute.
+Edit the configuration file at:
+`/Applications/LightScope.app/Contents/Resources/config/config.ini`
 
+## Logs
 
-https://thelightscope.com
+View logs at:
+`/Applications/LightScope.app/Contents/Resources/logs/`
 
+## Management
+
+- **Stop**: `launchctl unload ~/Library/LaunchAgents/com.thelightscope.lightscope.plist`
+- **Start**: `launchctl load ~/Library/LaunchAgents/com.thelightscope.lightscope.plist`
+- **Uninstall**: `./uninstall.sh`
+
+## Requirements
+
+- macOS 10.14 or later
+- Python 3.8 or later
+- Network access for monitoring
+- BPF permissions for packet capture
+
+## Features
+
+- Runs as user application (no root required)
+- Automatic startup at login
+- Background operation
+- Network packet monitoring
+- Honeypot functionality
+- Automatic updates
+
+## Security
+
+- Does not require root privileges to run
+- Uses Berkeley Packet Filter (BPF) for safe packet capture
+- Group-based permissions following macOS security best practices
+- Same approach used by Wireshark and other professional tools
+
+## Troubleshooting
+
+If packet capture fails:
+1. Check BPF permissions: `ls -la /dev/bpf*`
+2. Verify group membership: `groups`
+3. Re-run setup: `sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh`
+4. Log out and log back in for group changes to take effect

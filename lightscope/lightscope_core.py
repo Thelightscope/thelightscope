@@ -19,6 +19,7 @@ import time
 from collections import defaultdict, deque, OrderedDict
 from sys import platform
 from collections import Counter
+from typing import List
 import socket, select, time
 # Third-party imports
 import dpkt
@@ -27,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.2"
+ls_version = "1.0.15"
 
 print(f"ls_version: {ls_version}")
 
@@ -35,6 +36,10 @@ benchmark_times=[]
 
 # Global watchdog notification function (set by runner)
 systemd_watchdog_notify = None
+
+# Global events set by the runner for communication
+runner_shutdown_event = None
+runner_update_event = None
 
 verbose=1
 if verbose == 0:
@@ -53,6 +58,25 @@ elif verbose == 2:
 
 # Global memory management constant
 MAX_SIZE = 100000  # Maximum size for all deques, queues, and collections
+
+# Memory monitoring for container environments
+def check_memory_usage():
+    """Check if we're approaching memory limits in containerized environments"""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        
+        # If in container and approaching limit, trigger graceful shutdown
+        container_memory_limit = os.environ.get('CONTAINER_MEMORY_LIMIT_MB')
+        if container_memory_limit:
+            limit_mb = int(container_memory_limit)
+            if memory_mb > limit_mb * 0.9:  # 90% of limit
+                print(f"Memory usage {memory_mb:.1f}MB approaching container limit {limit_mb}MB")
+                return True
+        return False
+    except Exception:
+        return False
 
 # packet_info.py
 import dpkt
@@ -274,7 +298,7 @@ TCP_OPT_NAMES = {
     # and any future ones will be rendered as OPT<kind>
 }
 
-def human_readable_tcp_opts(raw_opts: bytes) -> list[str]:
+def human_readable_tcp_opts(raw_opts: bytes) -> List[str]:
     """
     Turn the raw TCP-options bytes into a list of humanreadable strings.
     Unknown kinds become "OPT<kind>".
@@ -478,12 +502,25 @@ class Ports:
 
         self.check_if_ip_changed_packet_interval=2000
         self.external_ip= external_network_information["queried_ip"]
-        self.internal_ips=internal_ips
+        
+        # Handle both single interface and dict of interfaces
+        if isinstance(internal_ips, dict) and 'ipv4' not in internal_ips:
+            # It's a dict of {interface: {'ipv4': [...], 'ipv6': [...]}}
+            all_ipv4 = []
+            all_ipv6 = []
+            for iface_ips in internal_ips.values():
+                all_ipv4.extend(iface_ips.get('ipv4', []))
+                all_ipv6.extend(iface_ips.get('ipv6', []))
+            self.internal_ips = {'ipv4': all_ipv4, 'ipv6': all_ipv6}
+        else:
+            # It's already in the format {'ipv4': [...], 'ipv6': [...]}
+            self.internal_ips = internal_ips
+            
         self.asn=0
         self.external_network_information=external_network_information
         #self.internal_network_information=internal_network_information
         self.max_unwanted_buffer_size=5000
-        self.interface=interface
+        self.interface=interface if isinstance(interface, str) else "all_interfaces"
 
         self.database=config_settings['database']
         self.randomization_key=config_settings['randomization_key']
@@ -1246,6 +1283,12 @@ class Ports:
 
             now = time.monotonic()
             
+            # Check memory usage in containerized environments
+            if check_memory_usage():
+                print("Memory limit approaching, initiating graceful shutdown for restart...")
+                self.clear_and_report_all_watched_packets()
+                return  # Exit gracefully to trigger container restart
+            
             # Send systemd watchdog notification (if available)
             if systemd_watchdog_notify:
                 try:
@@ -1298,7 +1341,7 @@ class Ports:
 
 
             if (now - prior_time) >= 1:
-                ###print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
+                print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
                 packets_processed=0
                 prior_time=now
                     
@@ -1545,11 +1588,20 @@ def send_data(consumer_upload_conn):
 
 
                 
-def read_from_interface_mac_linux(network_interface,
+def read_from_interface_mac_linux(network_interfaces,  # List of interface names or single interface
                         unprocessed_packets,         # duplex Pipe
                         promisc_mode=False):
 
     import pylibpcap.base
+    
+    # Handle both single interface (string) and multiple interfaces (list/dict)
+    if isinstance(network_interfaces, str):
+        interfaces = [network_interfaces]
+    elif isinstance(network_interfaces, dict):
+        interfaces = list(network_interfaces.keys())
+    else:
+        interfaces = network_interfaces
+    
     BATCH_SIZE      = 280
     IDLE_FLUSH_SECS = 1.0
     SLEEP_DELAY     = 0.001  # 1ms when no flush condition met
@@ -1559,24 +1611,17 @@ def read_from_interface_mac_linux(network_interface,
     # --------------------------- sender thread ---------------------------
     def sender_thread():
         nonlocal last_activity
-        
-        #todo remove debug
-
         prior_time=time.monotonic()
         packets_processed=0
-
-        
 
         while True:
             now = time.monotonic()
             to_send = 0
 
             if (now - prior_time) >= IDLE_FLUSH_SECS:
-                ###print(f"read_from_interface_mac_linux: pps {packets_processed} {network_interface}  len(send_deque) {len(send_deque)} ",flush=True)
+                ###print(f"read_from_interface_mac_linux: pps {packets_processed} len(send_deque) {len(send_deque)} ",flush=True)
                 packets_processed=0
                 prior_time=now
-
-
 
             # 1) full batch ready?
             if len(send_deque) >= BATCH_SIZE:
@@ -1591,7 +1636,6 @@ def read_from_interface_mac_linux(network_interface,
                 time.sleep(SLEEP_DELAY)
                 continue
             
-            
             # build and send batch
             batch = [send_deque.popleft() for _ in range(to_send)]
             try:
@@ -1600,47 +1644,59 @@ def read_from_interface_mac_linux(network_interface,
                 ###print("pipe send error:", e, file=sys.stderr)
                 return
 
-
-
-            #todo remove debug code
             packets_processed+=to_send
-
-           
 
     threading.Thread(target=sender_thread, daemon=True).start()
 
-    # --------------------------- sniffer init ----------------------------
-    try:
-        sniffobj = pylibpcap.base.Sniff(
-            network_interface,
-            count=-1,
-            promisc=int(promisc_mode),
-            #todo may need to allow ARP again if discovering
-            filter="ip and tcp",
-            buffer_size=1 << 20,
-            snaplen=256
-        )
-    except Exception as e:
-        ###print(f"ERROR initializing capture: {e}", file=sys.stderr)
+    # --------------------------- sniffer init for all interfaces ----------------------------
+    sniffers = {}
+    packet_counters = {}
+    
+    for iface in interfaces:
+        try:
+            sniffobj = pylibpcap.base.Sniff(
+                iface,
+                count=-1,
+                promisc=int(promisc_mode),
+                filter="ip and tcp",
+                buffer_size=1 << 20,
+                snaplen=256
+            )
+            sniffers[iface] = sniffobj
+            packet_counters[iface] = 0
+            print(f"Capturing on interface: {iface}", flush=True)
+        except Exception as e:
+            print(f"ERROR initializing capture on {iface}: {e}", flush=True)
+    
+    if not sniffers:
+        print("ERROR: No interfaces available for capture", flush=True)
         sys.exit(1)
 
-    # --------------------------- capture loop ---------------------------
-    packet_number = 0
-    for plen, ts, buf in sniffobj.capture():
-        packet_number += 1
-        try:
+    # --------------------------- capture loop - round robin all interfaces ---------------------------
+    while True:
+        for iface, sniffobj in list(sniffers.items()):
             try:
-                pkt_info = parse_packet_info_fast(buf, packet_number)
-            except Exception as a:
-                pkt_info = parse_packet_info(buf, packet_number)
-                #print(f"parse_packet_info_fast {a}",flush=True)
-        except Exception as v:
-            # could be VLAN, ARP, IPv6, malformedjust drop it
-            #print(f"parse_packet_info_ slow {v}",flush=True)
-            continue
-
-        send_deque.append(pkt_info)
-        last_activity = time.monotonic()
+                for plen, ts, buf in sniffobj.capture():
+                    packet_counters[iface] += 1
+                    try:
+                        try:
+                            pkt_info = parse_packet_info_fast(buf, packet_counters[iface])
+                        except Exception:
+                            pkt_info = parse_packet_info(buf, packet_counters[iface])
+                    except Exception:
+                        # VLAN, ARP, IPv6, malformed - drop it
+                        pass
+                    else:
+                        send_deque.append(pkt_info)
+                        last_activity = time.monotonic()
+                    
+                    # Only one packet per interface per round for fairness
+                    break
+            except Exception as e:
+                print(f"ERROR on {iface}: {e}", flush=True)
+                del sniffers[iface]
+                if not sniffers:
+                    return
 
 
 import sys
@@ -1650,49 +1706,19 @@ from collections import deque
 
 
 
-def read_from_interface_windows(network_interface,
+def read_from_interface_windows(network_interfaces,  # List of interface names or single interface
                                 unprocessed_packets,  # duplex Pipe
                                 promisc_mode=False):
 
-    interface_human_readable=""
-    import re, wmi
-
-    # initialize WMI once
-    _wmi = wmi.WMI()
-    m = re.search(r'\{([0-9A-Fa-f-]+)\}', network_interface)
-    if m:
-        guid = m.group(1).lower()
-        # search the *adapter* class (not the Configuration class!)
-        for nic in _wmi.Win32_NetworkAdapter():
-            if not nic.GUID:
-                continue
-            if nic.GUID.strip('{}').lower() == guid:
-                friendly = (
-                    nic.NetConnectionID
-                    or nic.Name
-                    or nic.Description
-                )
-                # *** assignment, not comparison! ***
-                interface_human_readable = friendly +network_interface
-                break
-
     import pcap
-    # --- 1) Discover all raw NPF device names ---
-    devs = pcap.findalldevs()
-    if not devs:
-        ###print("No capture devices found. Is Npcap installed and running?", file=sys.stderr)
-        sys.exit(1)
-
-    # If the caller passed a friendly name (e.g. "Ethernet"), try to match it:
-    if network_interface not in devs:
-        ###print(f"Warning: '{network_interface}' is not one of the NPF devices.", file=sys.stderr)
-        ###print("Available devices:", file=sys.stderr)
-        for i, d in enumerate(devs, 1):
-            ###print(f"  {i}. {d}", file=sys.stderr)
-            pass
-        # fall back to first device
-        network_interface = devs[0]
-        ###print(f"Falling back to first device: {network_interface!r}", file=sys.stderr)
+    
+    # Handle both single interface (string) and multiple interfaces (list/dict)
+    if isinstance(network_interfaces, str):
+        interfaces = [network_interfaces]
+    elif isinstance(network_interfaces, dict):
+        interfaces = list(network_interfaces.keys())
+    else:
+        interfaces = network_interfaces
 
     BATCH_SIZE      = 280
     IDLE_FLUSH_SECS = 1.0
@@ -1711,7 +1737,7 @@ def read_from_interface_windows(network_interface,
             to_send = 0
 
             if (now - prior_time) >= IDLE_FLUSH_SECS:
-                ###print(f"len(send_deque) {len(send_deque)} pps {packets_processed} {interface_human_readable}", flush=True)
+                print(f"read_from_interface_windows len(send_deque) {len(send_deque)} pps {packets_processed}", flush=True)
                 packets_processed = 0
                 prior_time = now
 
@@ -1731,50 +1757,67 @@ def read_from_interface_windows(network_interface,
                 return
 
             packets_processed += to_send
-            
 
     threading.Thread(target=sender_thread, daemon=True).start()
 
-    # --------------------------- sniffer init ----------------------------
-    try:
-        sniffer = pcap.pcap(
-            name=network_interface,
-            snaplen=256,
-            promisc=bool(promisc_mode),
-            immediate=True,
-            timeout_ms=50
-        )
-    except Exception as e:
-        ###print(f"ERROR initializing capture: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # --- verify it really opened ---
-    linktype = sniffer.datalink()
-    if linktype < 0:
-        ###print(f"ERROR: Failed to open '{network_interface}' (datalink() returned {linktype})", file=sys.stderr)
-        sys.exit(1)
-
-    # --- install the BPF filter ---
-    try:
-        sniffer.setfilter("ip and tcp")
-    except Exception as e:
-        ###print(f"ERROR setting filter: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # --------------------------- capture loop ----------------------------
-    packet_number = 0
-    for ts, buf in sniffer:
-        packet_number += 1
+    # --------------------------- sniffer init for all interfaces ----------------------------
+    sniffers = {}
+    packet_counters = {}
+    
+    for iface in interfaces:
         try:
-            try:
-                pkt_info = parse_packet_info_fast(buf, packet_number)
-            except Exception:
-                pkt_info = parse_packet_info(buf, packet_number)
-        except Exception:
-            continue
+            sniffer = pcap.pcap(
+                name=iface,
+                snaplen=256,
+                promisc=bool(promisc_mode),
+                immediate=True,
+                timeout_ms=50
+            )
+            
+            # Verify it opened
+            linktype = sniffer.datalink()
+            if linktype < 0:
+                print(f"ERROR: Failed to open '{iface}' (datalink() returned {linktype})", flush=True)
+                continue
+            
+            # Install BPF filter
+            sniffer.setfilter("ip and tcp")
+            
+            sniffers[iface] = sniffer
+            packet_counters[iface] = 0
+            print(f"Capturing on interface: {iface}", flush=True)
+        except Exception as e:
+            print(f"ERROR initializing capture on {iface}: {e}", flush=True)
+    
+    if not sniffers:
+        print("ERROR: No interfaces available for capture", flush=True)
+        sys.exit(1)
 
-        send_deque.append(pkt_info)
-        last_activity = time.monotonic()
+    # --------------------------- capture loop - round robin all interfaces ----------------------------
+    while True:
+        for iface, sniffer in list(sniffers.items()):
+            try:
+                for ts, buf in sniffer:
+                    packet_counters[iface] += 1
+                    try:
+                        try:
+                            pkt_info = parse_packet_info_fast(buf, packet_counters[iface])
+                        except Exception:
+                            pkt_info = parse_packet_info(buf, packet_counters[iface])
+                    except Exception:
+                        # VLAN, ARP, IPv6, malformed - drop it
+                        pass
+                    else:
+                        send_deque.append(pkt_info)
+                        last_activity = time.monotonic()
+                    
+                    # Only one packet per interface per round for fairness
+                    break
+            except Exception as e:
+                print(f"ERROR on {iface}: {e}", flush=True)
+                del sniffers[iface]
+                if not sniffers:
+                    return
 
 
 
@@ -1971,7 +2014,11 @@ def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
 
 def lightscope_run():
     if  platforminfo.system() != "Windows":
-        from systemd import daemon
+        try:
+            from systemd import daemon
+        except ImportError:
+            # systemd not available (e.g., on macOS)
+            pass
         
         config_reader = configuration_reader()
         config_settings = config_reader.get_config()
@@ -2001,116 +2048,79 @@ def lightscope_run():
         hp_uploader.start()
         # end honeypot
 
-        # helper to spawn the three subprocesses for one interface
-        def spawn_for_interface_mac_linux(iface, internal_ips, top_unwanted_ports_producer, shared_open_honeypots):
-            # 1) make the two duplex pipes
-            unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
-            up_consumer, up_producer     = multiprocessing.Pipe(duplex=False)
-
-            port_status = Ports(
-                up_producer,
-                internal_ips,
-                False,              # internal == external
-                iface,
-                external_network_information,
-                config_settings,
-                system_info,
-                top_unwanted_ports_producer,
-                shared_open_honeypots
-            )
-
-            p_lscope = multiprocessing.Process(
-                target=port_status.packet_handler,
-                args=(unproc_consumer,),
-                name=f"lightscope[{iface}]"
-            )
-            p_reader = multiprocessing.Process(
-                target=read_from_interface_mac_linux,
-                args=(iface, unproc_producer),
-                name=f"reader[{iface}]"
-            )
-            p_uploader = multiprocessing.Process(
-                target=send_data,
-                args=(up_consumer,),
-                name=f"uploader[{iface}]"
-            )
-
-            for p in (p_lscope, p_reader, p_uploader):
-                p.start()
-
-            return {
-                "internal_ips":           internal_ips,
-                "pipes": {
-                    "unprocessed": (unproc_consumer, unproc_producer),
-                    "upload":      (up_consumer, up_producer),
-                },
-                "lightscope_process":         p_lscope,
-                "read_from_interface_process": p_reader,
-                "upload_process":             p_uploader,
-            }
-
-        # --- initial discovery & spawn ---
+        # --- initial discovery & spawn ONE set of processes for ALL interfaces ---
         interfaces_and_ips = choose_mac_linux_interface()
-        processes_per_interface = {}
-        for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_mac_linux(iface, ips,top_unwanted_ports_producer, shared_open_honeypots)
+        print(f"Discovered {len(interfaces_and_ips)} interfaces: {list(interfaces_and_ips.keys())}")
+        
+        # Create pipes
+        unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+        up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
 
-        print("Live interfaces:", list(processes_per_interface))
+        # Create Ports instance with ALL interfaces
+        port_status = Ports(
+            up_producer,
+            interfaces_and_ips,  # Pass dict of all interfaces
+            False,
+            external_network_information,
+            config_settings,
+            system_info,
+            top_unwanted_ports_producer,
+            shared_open_honeypots
+        )
+
+        # Spawn ONE process for packet handling
+        p_lscope = multiprocessing.Process(
+            target=port_status.packet_handler,
+            args=(unproc_consumer,),
+            name="lightscope"
+        )
+        # Spawn ONE process for reading from ALL interfaces
+        p_reader = multiprocessing.Process(
+            target=read_from_interface_mac_linux,
+            args=(interfaces_and_ips, unproc_producer),  # Pass all interfaces
+            name="reader"
+        )
+        # Spawn ONE process for uploading
+        p_uploader = multiprocessing.Process(
+            target=send_data,
+            args=(up_consumer,),
+            name="uploader"
+        )
+
+        for p in (p_lscope, p_reader, p_uploader):
+            p.start()
+
+        print(f"LightScope started monitoring all interfaces")
 
         # --- monitor loop ---
         while True:
-            time.sleep(60)  # Check every 60 seconds instead of busy waiting
+            time.sleep(60)
             
-            new_mapping = choose_mac_linux_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
-            
-            # Try to update external network information, but don't crash if it fails
-            try:
-                external_network_information = fetch_light_scope_info()
-            except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating processes for restart...")
+                for p in (p_lscope, p_reader, p_uploader):
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
-
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_mac_linux(same, new_ips, top_unwanted_ports_producer, shared_open_honeypots)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_mac_linux(born, ips, top_unwanted_ports_producer, shared_open_honeypots)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
+                print("[+] All processes terminated. Exiting core for update restart.")
+                return
+            
+            # Try to update external network information
+            try:
+                external_network_information = fetch_light_scope_info()
+            except Exception as e:
+                print(f"Warning: Failed to update external network information: {e}")
+            
+            # Check if any process died
+            if not p_lscope.is_alive() or not p_reader.is_alive() or not p_uploader.is_alive():
+                print("[!] A process died, restarting all...")
+                for p in (p_lscope, p_reader, p_uploader):
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[!] Exiting for restart...")
+                sys.exit(1)
 
 
 
@@ -2145,116 +2155,79 @@ def lightscope_run():
         hp_uploader.start()
         # end honeypot
 
-        # helper to spawn the three subprocesses for one interface
-        def spawn_for_interface_windows(iface, internal_ips):
-            # 1) make the two duplex pipes
-            unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
-            up_consumer, up_producer     = multiprocessing.Pipe(duplex=False)
-
-            port_status = Ports(
-                up_producer,
-                internal_ips,
-                False,              # internal == external
-                iface,
-                external_network_information,
-                config_settings,
-                system_info,
-                top_unwanted_ports_producer,
-                shared_open_honeypots
-            )
-
-            p_lscope = multiprocessing.Process(
-                target=port_status.packet_handler,
-                args=(unproc_consumer,),
-                name=f"lightscope[{iface}]"
-            )
-            p_reader = multiprocessing.Process(
-                target=read_from_interface_windows,
-                args=(iface, unproc_producer),
-                name=f"reader[{iface}]"
-            )
-            p_uploader = multiprocessing.Process(
-                target=send_data,
-                args=(up_consumer,),
-                name=f"uploader[{iface}]"
-            )
-
-            for p in (p_lscope, p_reader, p_uploader):
-                p.start()
-
-            return {
-                "internal_ips":           internal_ips,
-                "pipes": {
-                    "unprocessed": (unproc_consumer, unproc_producer),
-                    "upload":      (up_consumer, up_producer),
-                },
-                "lightscope_process":         p_lscope,
-                "read_from_interface_process": p_reader,
-                "upload_process":             p_uploader,
-            }
-
-        # --- initial discovery & spawn ---
+        # --- initial discovery & spawn ONE set of processes for ALL interfaces ---
         interfaces_and_ips = choose_windows_interface()
-        processes_per_interface = {}
-        for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_windows(iface, ips)
+        print(f"Discovered {len(interfaces_and_ips)} interfaces: {list(interfaces_and_ips.keys())}")
+        
+        # Create pipes
+        unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+        up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
 
-        print("Live interfaces:", list(processes_per_interface))
+        # Create Ports instance with ALL interfaces
+        port_status = Ports(
+            up_producer,
+            interfaces_and_ips,  # Pass dict of all interfaces
+            False,
+            external_network_information,
+            config_settings,
+            system_info,
+            top_unwanted_ports_producer,
+            shared_open_honeypots
+        )
+
+        # Spawn ONE process for packet handling
+        p_lscope = multiprocessing.Process(
+            target=port_status.packet_handler,
+            args=(unproc_consumer,),
+            name="lightscope"
+        )
+        # Spawn ONE process for reading from ALL interfaces
+        p_reader = multiprocessing.Process(
+            target=read_from_interface_windows,
+            args=(interfaces_and_ips, unproc_producer),  # Pass all interfaces
+            name="reader"
+        )
+        # Spawn ONE process for uploading
+        p_uploader = multiprocessing.Process(
+            target=send_data,
+            args=(up_consumer,),
+            name="uploader"
+        )
+
+        for p in (p_lscope, p_reader, p_uploader):
+            p.start()
+
+        print(f"LightScope started monitoring all interfaces")
 
         # --- monitor loop ---
         while True:
             time.sleep(60)
 
-            # Try to update external network information, but don't crash if it fails
-            try:
-                external_network_information = fetch_light_scope_info()
-            except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-                
-            new_mapping = choose_windows_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating processes for restart...")
+                for p in (p_lscope, p_reader, p_uploader):
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
+                print("[+] All processes terminated. Exiting core for update restart.")
+                return
 
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_windows(same, new_ips)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_windows(born, ips)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
+            # Try to update external network information
+            try:
+                external_network_information = fetch_light_scope_info()
+            except Exception as e:
+                print(f"Warning: Failed to update external network information: {e}")
+            
+            # Check if any process died
+            if not p_lscope.is_alive() or not p_reader.is_alive() or not p_uploader.is_alive():
+                print("[!] A process died, restarting all...")
+                for p in (p_lscope, p_reader, p_uploader):
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[!] Exiting for restart...")
+                sys.exit(1)
     
 
 
@@ -2285,7 +2258,7 @@ class configuration_reader:
         self.randomization_key="uninitialized"
         self.initialize_config("config.ini")
         self.load_config(config_file)
-        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/tables/{self.database}")
+        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
 
 
     def get_config(self):
@@ -2333,11 +2306,26 @@ class configuration_reader:
         elif 'database' not in config['Settings'] or not config['Settings']['database'].strip():
             # Generate new database name only if not in environment and not in config
             today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-            max_len = 63                                   # leave room under 64
-            rand_len = max_len - len(today) - 1            # "-1" for the underscore
-            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-            config['Settings']['database'] = f"{today}_{rand_part}"
-            print(f"Database not found; generated random database name: {config['Settings']['database']}")
+            
+            # Check if GreyNoise mode is enabled by presence of .greynoise file
+            greynoise_paths = ["/tmp/.greynoise", "/opt/lightscope/.greynoise", 
+                             os.path.expanduser("~/.greynoise")]
+            is_greynoise = any(os.path.exists(path) for path in greynoise_paths)
+            
+            if is_greynoise:
+                # For GreyNoise: gn + date + 45 random chars (total 56 chars: 2+8+1+45)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 3        # "-3" for "gn" and underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"gn{today}_{rand_part}"
+                print(f"Database not found; generated GreyNoise database name: {config['Settings']['database']}")
+            else:
+                # Standard format: date + 47 random chars (total 56 chars: 8+1+47)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 1        # "-1" for the underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"{today}_{rand_part}"
+                print(f"Database not found; generated random database name: {config['Settings']['database']}")
         else:
             # Use existing database name from config file
             print(f"Using existing database name from config: {config['Settings']['database']}")
@@ -2435,6 +2423,65 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             except Exception as e:
                 print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
         
+        def try_bind_port(desired_port, max_attempts=10):
+            """
+            Try to bind to desired_port, and if it fails try nearby alternatives.
+            Returns (socket, actual_port) on success, or (None, None) on failure.
+            """
+            # List of ports to try - start with desired port, then nearby alternatives
+            ports_to_try = [desired_port]
+            
+            # Add nearby ports (±1, ±2, ±10, ±100)
+            for offset in [1, -1, 2, -2, 10, -10, 100, -100]:
+                candidate = desired_port + offset
+                if 1024 <= candidate <= 65535 and candidate not in ports_to_try:
+                    ports_to_try.append(candidate)
+            
+            # Add some random high ports as fallback
+            import random
+            currently_open = set(sockets.values())
+            available_random = [p for p in range(10000, 65536) 
+                              if p not in ports_to_try and p not in currently_open and p not in previously_opened_ports]
+            if available_random:
+                ports_to_try.extend(random.sample(available_random, min(5, len(available_random))))
+            
+            # Limit attempts
+            ports_to_try = ports_to_try[:max_attempts]
+            
+            for attempt, port in enumerate(ports_to_try):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind(("", port))
+                    s.listen()
+                    
+                    if port != desired_port:
+                        print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
+                    
+                    return s, port
+                    
+                except OSError as e:
+                    if e.errno == 98:  # EADDRINUSE - Address already in use
+                        if attempt == 0:  # Only log for the first (desired) port
+                            print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
+                        continue
+                    elif e.errno == 13:  # EACCES - Permission denied  
+                        if port < 1024:
+                            print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
+                            continue
+                        else:
+                            print(f"_honeypot_worker: Permission denied for port {port}: {e}", flush=True)
+                            continue
+                    else:
+                        print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                        continue
+                except Exception as e:
+                    print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                    continue
+            
+            print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
+            return None, None
+        
         # Define priority ports to open first
         priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
         
@@ -2450,25 +2497,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         
         print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
         
-        # Try to open initial ports
-        for port in initial_ports:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(("", port))
-                s.listen()
-                sockets[s] = port
-                previously_opened_ports.add(port)  # Track this port in history
-                print(f"_honeypot_worker: Initial startup port {port} opened successfully", flush=True)
-            except Exception as e:
-                print(f"_honeypot_worker: Failed to open initial port {port}: {e}", flush=True)
-                import os
-                try:
-                    print(f"_honeypot_worker: Running as UID {os.getuid()}, GID {os.getgid()}", flush=True)
-                except:
-                    print(f"_honeypot_worker: Could not get UID/GID", flush=True)
-                if port < 1024:
-                    print(f"_honeypot_worker: Port {port} < 1024 requires root or CAP_NET_BIND_SERVICE", flush=True)
+        # Try to open initial ports with retry logic
+        for desired_port in initial_ports:
+            s, actual_port = try_bind_port(desired_port)
+            if s and actual_port:
+                sockets[s] = actual_port
+                previously_opened_ports.add(actual_port)  # Track this port in history
+                print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
+            else:
+                print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
         
         # Update shared memory with initial ports
         print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
@@ -2738,18 +2775,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             except: pass
                             print(f"_honeypot_worker: Closed port {port}", flush=True)
                 
-                # Open new ports  
-                for port in to_open:
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(("", port))
-                        s.listen()
-                        sockets[s] = port
-                        previously_opened_ports.add(port)  # Track this port in history
-                        print(f"_honeypot_worker: Auto-opened port {port}", flush=True)
-                    except Exception as e:
-                        print(f"_honeypot_worker: Failed to auto-open port {port}: {e}", flush=True)
+                # Open new ports with retry logic
+                for desired_port in to_open:
+                    s, actual_port = try_bind_port(desired_port)
+                    if s and actual_port:
+                        sockets[s] = actual_port
+                        previously_opened_ports.add(actual_port)  # Track this port in history
+                        print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
+                    else:
+                        print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
 
                 update_shared_honeypot_ports()
                 interface_port_counts.clear()  # Reset for next cycle
@@ -2784,8 +2818,14 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             # Handle old format for compatibility
                             interface_port_counts["unknown"] = data.copy()
                             interface_names.add("unknown")
+                    except (BrokenPipeError, EOFError, ConnectionResetError) as e:
+                        # These errors are expected during updates when interface processes are terminated
+                        ###print(f"_honeypot_worker: Interface process communication error (likely during update): {e}", flush=True)
+                        pass  # Silently ignore these during normal operation
                     except Exception as e:
-                        print(f"_honeypot_worker: Error processing port count data: {e}", flush=True)
+                        print(f"_honeypot_worker: Error processing port count data: {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        print(f"_honeypot_worker: Full traceback: {traceback.format_exc()}", flush=True)
                 
                 # Check if we need to clear port history (after 7 days)
                 if now >= history_clear_time:

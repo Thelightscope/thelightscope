@@ -110,7 +110,7 @@ fi
 
 echo ""
 echo "6. Signing the code..."
-python3 sign-and-upload.py --verify
+python3 sign-and-upload.py --verify --package-type rpm
 
 echo ""
 echo "7. Upload directory created:"
@@ -202,9 +202,11 @@ fi
 
 # Prompt for server credentials
 echo "Enter server username (e.g., user):"
-read SERVER_USER
-echo "Enter server hostname (e.g., server):"
-read SERVER_HOST
+#read SERVER_USER
+#echo "Enter server hostname (e.g., server):"
+#read SERVER_HOST
+SERVER_USER="kapitans"
+SERVER_HOST="lightscope.isi.edu"
 SERVER_USER_HOST="${SERVER_USER}@${SERVER_HOST}"
 
 echo "Enter password for ${SERVER_USER_HOST}:"

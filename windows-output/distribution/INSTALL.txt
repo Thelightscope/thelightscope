@@ -1,0 +1,40 @@
+﻿LightScope Windows Installation Instructions
+==========================================
+
+AUTOMATIC INSTALLATION (Recommended):
+1. Run lightscope_latest.exe as Administrator
+2. Follow the installation wizard
+3. LightScope will start automatically in the background
+
+MANUAL INSTALLATION:
+1. Install Python 3.8+ from https://python.org/
+2. Install Npcap from https://nmap.org/npcap/
+3. Install required Python packages:
+   pip install cryptography psutil requests dpkt pywin32
+4. Copy all .py files to desired location (e.g., C:\LightScope\)
+5. Run:
+   python lightscope-runner-windows.py
+
+USER MODE OPERATION:
+- The software runs as a user-level application in a virtual environment
+- No administrator privileges required
+- Automatically starts with Windows login (background mode)
+- Virtual environment is activated automatically
+- No visible command prompt window
+
+RUNNING LIGHTSCOPE:
+- Background mode (default): start-lightscope-background.bat
+- Debug mode (visible window): start-lightscope.bat
+- Both launchers located in: %LOCALAPPDATA%\LightScope\
+- Start Menu shortcuts available for management
+- Desktop shortcut is optional (unchecked by default)
+
+LOGS:
+- Application logs: %LOCALAPPDATA%\LightScope\logs\
+- Installation log: %LOCALAPPDATA%\LightScope\lightscope-installation.log
+
+UNINSTALL:
+- Use Add/Remove Programs or
+- Run the uninstaller from Start Menu > LightScope
+
+For support, visit: https://thelightscope.com/

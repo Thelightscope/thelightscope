@@ -1,0 +1,2 @@
+
+powershell -ExecutionPolicy Bypass -File "C:\Users\Eric\Desktop\thelightscope\build-windows-installer.ps1"

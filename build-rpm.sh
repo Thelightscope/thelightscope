@@ -23,6 +23,25 @@ mkdir -p "$RPM_BUILD_DIR"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 echo "Copying lightscope/lightscope_core.py (v$VERSION) to RPM SOURCES directory..."
 cp lightscope/lightscope_core.py "$RPM_BUILD_DIR/SOURCES/"
 
+# Copy the lightscope-runner.py script to SOURCES
+echo "Copying lightscope/lightscope-runner.py to RPM SOURCES directory..."
+if [ -f "lightscope/lightscope-runner.py" ]; then
+    cp lightscope/lightscope-runner.py "$RPM_BUILD_DIR/SOURCES/lightscope_runner.py"
+    echo "✅ Successfully copied lightscope-runner.py to SOURCES"
+else
+    echo "Error: lightscope/lightscope-runner.py not found!"
+    exit 1
+fi
+
+# Verify the runner script copy
+if [ -f "$RPM_BUILD_DIR/SOURCES/lightscope_runner.py" ]; then
+    RUNNER_SIZE=$(stat -c%s "$RPM_BUILD_DIR/SOURCES/lightscope_runner.py")
+    echo "✅ Runner script copied successfully (size: $RUNNER_SIZE bytes)"
+else
+    echo "Error: Runner script not found in SOURCES directory!"
+    exit 1
+fi
+
 # Verify the copy worked
 BUILT_VERSION=$(grep -o 'ls_version = "[^"]*"' "$RPM_BUILD_DIR/SOURCES/lightscope_core.py" | sed 's/ls_version = "\(.*\)"/\1/')
 echo "Verified SOURCES version: $BUILT_VERSION"

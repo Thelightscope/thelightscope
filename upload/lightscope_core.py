@@ -19,6 +19,7 @@ import time
 from collections import defaultdict, deque, OrderedDict
 from sys import platform
 from collections import Counter
+from typing import List
 import socket, select, time
 # Third-party imports
 import dpkt
@@ -27,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.2"
+ls_version = "1.0.15"
 
 print(f"ls_version: {ls_version}")
 
@@ -35,6 +36,10 @@ benchmark_times=[]
 
 # Global watchdog notification function (set by runner)
 systemd_watchdog_notify = None
+
+# Global events set by the runner for communication
+runner_shutdown_event = None
+runner_update_event = None
 
 verbose=1
 if verbose == 0:
@@ -274,7 +279,7 @@ TCP_OPT_NAMES = {
     # and any future ones will be rendered as OPT<kind>
 }
 
-def human_readable_tcp_opts(raw_opts: bytes) -> list[str]:
+def human_readable_tcp_opts(raw_opts: bytes) -> List[str]:
     """
     Turn the raw TCP-options bytes into a list of humanreadable strings.
     Unknown kinds become "OPT<kind>".
@@ -1298,7 +1303,7 @@ class Ports:
 
 
             if (now - prior_time) >= 1:
-                ###print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
+                print(f"packet_handler: pps {packets_processed} port_counts {len(self.port_counts)} self.local_copy_open_honeypots {self.local_copy_open_honeypots} len(work_deque) {len(work_deque)} {self.interface_human_readable}",flush=True)
                 packets_processed=0
                 prior_time=now
                     
@@ -1711,7 +1716,7 @@ def read_from_interface_windows(network_interface,
             to_send = 0
 
             if (now - prior_time) >= IDLE_FLUSH_SECS:
-                ###print(f"len(send_deque) {len(send_deque)} pps {packets_processed} {interface_human_readable}", flush=True)
+                print(f"read_from_interface_windows len(send_deque) {len(send_deque)} pps {packets_processed} {interface_human_readable}", flush=True)
                 packets_processed = 0
                 prior_time = now
 
@@ -1971,7 +1976,11 @@ def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
 
 def lightscope_run():
     if  platforminfo.system() != "Windows":
-        from systemd import daemon
+        try:
+            from systemd import daemon
+        except ImportError:
+            # systemd not available (e.g., on macOS)
+            pass
         
         config_reader = configuration_reader()
         config_settings = config_reader.get_config()
@@ -2061,6 +2070,20 @@ def lightscope_run():
         # --- monitor loop ---
         while True:
             time.sleep(60)  # Check every 60 seconds instead of busy waiting
+            
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating all interface processes for restart...")
+                # Terminate all interface processes
+                for iface, ctx in processes_per_interface.items():
+                    print(f"[+] Terminating processes for interface {iface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
             
             new_mapping = choose_mac_linux_interface()
             old_ifaces = set(interfaces_and_ips)
@@ -2206,6 +2229,20 @@ def lightscope_run():
         while True:
             time.sleep(60)
 
+            # Check if runner has signaled an update is available
+            if runner_update_event and runner_update_event.is_set():
+                print("[+] Update detected! Terminating all interface processes for restart...")
+                # Terminate all interface processes
+                for iface, ctx in processes_per_interface.items():
+                    print(f"[+] Terminating processes for interface {iface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
+
             # Try to update external network information, but don't crash if it fails
             try:
                 external_network_information = fetch_light_scope_info()
@@ -2285,7 +2322,7 @@ class configuration_reader:
         self.randomization_key="uninitialized"
         self.initialize_config("config.ini")
         self.load_config(config_file)
-        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/tables/{self.database}")
+        print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
 
 
     def get_config(self):
@@ -2333,11 +2370,26 @@ class configuration_reader:
         elif 'database' not in config['Settings'] or not config['Settings']['database'].strip():
             # Generate new database name only if not in environment and not in config
             today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
-            max_len = 63                                   # leave room under 64
-            rand_len = max_len - len(today) - 1            # "-1" for the underscore
-            rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
-            config['Settings']['database'] = f"{today}_{rand_part}"
-            print(f"Database not found; generated random database name: {config['Settings']['database']}")
+            
+            # Check if GreyNoise mode is enabled by presence of .greynoise file
+            greynoise_paths = ["/tmp/.greynoise", "/opt/lightscope/.greynoise", 
+                             os.path.expanduser("~/.greynoise")]
+            is_greynoise = any(os.path.exists(path) for path in greynoise_paths)
+            
+            if is_greynoise:
+                # For GreyNoise: gn + date + 45 random chars (total 56 chars: 2+8+1+45)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 3        # "-3" for "gn" and underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"gn{today}_{rand_part}"
+                print(f"Database not found; generated GreyNoise database name: {config['Settings']['database']}")
+            else:
+                # Standard format: date + 47 random chars (total 56 chars: 8+1+47)
+                max_len = 63                               # leave room under 64
+                rand_len = max_len - len(today) - 1        # "-1" for the underscore
+                rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
+                config['Settings']['database'] = f"{today}_{rand_part}"
+                print(f"Database not found; generated random database name: {config['Settings']['database']}")
         else:
             # Use existing database name from config file
             print(f"Using existing database name from config: {config['Settings']['database']}")
@@ -2435,6 +2487,65 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             except Exception as e:
                 print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
         
+        def try_bind_port(desired_port, max_attempts=10):
+            """
+            Try to bind to desired_port, and if it fails try nearby alternatives.
+            Returns (socket, actual_port) on success, or (None, None) on failure.
+            """
+            # List of ports to try - start with desired port, then nearby alternatives
+            ports_to_try = [desired_port]
+            
+            # Add nearby ports (±1, ±2, ±10, ±100)
+            for offset in [1, -1, 2, -2, 10, -10, 100, -100]:
+                candidate = desired_port + offset
+                if 1024 <= candidate <= 65535 and candidate not in ports_to_try:
+                    ports_to_try.append(candidate)
+            
+            # Add some random high ports as fallback
+            import random
+            currently_open = set(sockets.values())
+            available_random = [p for p in range(10000, 65536) 
+                              if p not in ports_to_try and p not in currently_open and p not in previously_opened_ports]
+            if available_random:
+                ports_to_try.extend(random.sample(available_random, min(5, len(available_random))))
+            
+            # Limit attempts
+            ports_to_try = ports_to_try[:max_attempts]
+            
+            for attempt, port in enumerate(ports_to_try):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind(("", port))
+                    s.listen()
+                    
+                    if port != desired_port:
+                        print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
+                    
+                    return s, port
+                    
+                except OSError as e:
+                    if e.errno == 98:  # EADDRINUSE - Address already in use
+                        if attempt == 0:  # Only log for the first (desired) port
+                            print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
+                        continue
+                    elif e.errno == 13:  # EACCES - Permission denied  
+                        if port < 1024:
+                            print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
+                            continue
+                        else:
+                            print(f"_honeypot_worker: Permission denied for port {port}: {e}", flush=True)
+                            continue
+                    else:
+                        print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                        continue
+                except Exception as e:
+                    print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                    continue
+            
+            print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
+            return None, None
+        
         # Define priority ports to open first
         priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
         
@@ -2450,25 +2561,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         
         print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
         
-        # Try to open initial ports
-        for port in initial_ports:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(("", port))
-                s.listen()
-                sockets[s] = port
-                previously_opened_ports.add(port)  # Track this port in history
-                print(f"_honeypot_worker: Initial startup port {port} opened successfully", flush=True)
-            except Exception as e:
-                print(f"_honeypot_worker: Failed to open initial port {port}: {e}", flush=True)
-                import os
-                try:
-                    print(f"_honeypot_worker: Running as UID {os.getuid()}, GID {os.getgid()}", flush=True)
-                except:
-                    print(f"_honeypot_worker: Could not get UID/GID", flush=True)
-                if port < 1024:
-                    print(f"_honeypot_worker: Port {port} < 1024 requires root or CAP_NET_BIND_SERVICE", flush=True)
+        # Try to open initial ports with retry logic
+        for desired_port in initial_ports:
+            s, actual_port = try_bind_port(desired_port)
+            if s and actual_port:
+                sockets[s] = actual_port
+                previously_opened_ports.add(actual_port)  # Track this port in history
+                print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
+            else:
+                print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
         
         # Update shared memory with initial ports
         print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
@@ -2738,18 +2839,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             except: pass
                             print(f"_honeypot_worker: Closed port {port}", flush=True)
                 
-                # Open new ports  
-                for port in to_open:
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(("", port))
-                        s.listen()
-                        sockets[s] = port
-                        previously_opened_ports.add(port)  # Track this port in history
-                        print(f"_honeypot_worker: Auto-opened port {port}", flush=True)
-                    except Exception as e:
-                        print(f"_honeypot_worker: Failed to auto-open port {port}: {e}", flush=True)
+                # Open new ports with retry logic
+                for desired_port in to_open:
+                    s, actual_port = try_bind_port(desired_port)
+                    if s and actual_port:
+                        sockets[s] = actual_port
+                        previously_opened_ports.add(actual_port)  # Track this port in history
+                        print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
+                    else:
+                        print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
 
                 update_shared_honeypot_ports()
                 interface_port_counts.clear()  # Reset for next cycle
@@ -2784,8 +2882,14 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             # Handle old format for compatibility
                             interface_port_counts["unknown"] = data.copy()
                             interface_names.add("unknown")
+                    except (BrokenPipeError, EOFError, ConnectionResetError) as e:
+                        # These errors are expected during updates when interface processes are terminated
+                        ###print(f"_honeypot_worker: Interface process communication error (likely during update): {e}", flush=True)
+                        pass  # Silently ignore these during normal operation
                     except Exception as e:
-                        print(f"_honeypot_worker: Error processing port count data: {e}", flush=True)
+                        print(f"_honeypot_worker: Error processing port count data: {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        print(f"_honeypot_worker: Full traceback: {traceback.format_exc()}", flush=True)
                 
                 # Check if we need to clear port history (after 7 days)
                 if now >= history_clear_time:

@@ -1,0 +1,19 @@
+# @Author: JanKinCai
+# @Date:   2019-11-09 17:22:29
+# @Last Modified by:   JanKinCai
+# @Last Modified time: 2019-11-09 17:22:29
+language: python
+
+# Ubuntu 18.04
+dist: bionic
+sudo: required
+
+python:
+  - 3.6
+
+install:
+  - sudo apt-get update
+  - sudo apt-get install libpcap-dev
+  - pip install -U tox-travis Cython
+
+script: tox

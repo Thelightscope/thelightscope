@@ -10,6 +10,7 @@ The Windows implementation provides the same functionality as the Linux version:
 - **Secure auto-updates** with digital signature verification
 - **Service management** through Windows Service Control Manager
 - **Professional installer** with dependency checking
+- **System tray icon** for easy access and dashboard viewing
 
 ## Files Created
 
@@ -30,7 +31,7 @@ The Windows implementation provides the same functionality as the Linux version:
 
 ### Required Python Packages
 ```bash
-pip install cryptography psutil requests dpkt pywin32
+pip install cryptography psutil requests dpkt pywin32 pystray Pillow
 ```
 
 ### Optional for Code Signing
@@ -96,6 +97,21 @@ The installer automatically checks for:
 - **Updates**: `C:\Program Files\LightScope\updates\`
 
 ## Service Management
+
+### System Tray Icon (NEW)
+
+LightScope now includes a system tray icon for easy access:
+
+- **Icon Location**: Lower right corner of Windows taskbar
+- **Tooltip**: Shows "LightScope Network Monitor" when hovered
+- **Right-click menu**:
+  - **View Dashboard** - Opens web dashboard for your database
+  - **Quit LightScope** - Gracefully stops the service
+
+The system tray icon automatically:
+- Reads your database name from `config.ini`
+- Opens the correct dashboard URL: `https://thelightscope.com/light_table/{db_name}`
+- Provides clean exit option without using Task Manager
 
 ### Using Windows Services
 
