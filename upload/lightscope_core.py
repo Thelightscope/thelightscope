@@ -2061,6 +2061,7 @@ def lightscope_run():
             up_producer,
             interfaces_and_ips,  # Pass dict of all interfaces
             False,
+            "all_interfaces",    # interface parameter
             external_network_information,
             config_settings,
             system_info,
@@ -2168,6 +2169,7 @@ def lightscope_run():
             up_producer,
             interfaces_and_ips,  # Pass dict of all interfaces
             False,
+            "all_interfaces",    # interface parameter
             external_network_information,
             config_settings,
             system_info,
