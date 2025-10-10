@@ -1673,9 +1673,11 @@ def read_from_interface_mac_linux(network_interfaces,  # List of interface names
         sys.exit(1)
 
     # --------------------------- capture loop - round robin all interfaces ---------------------------
+    PACKETS_PER_INTERFACE = 50  # Capture up to 50 packets per interface per round
     while True:
         for iface, sniffobj in list(sniffers.items()):
             try:
+                packets_captured = 0
                 for plen, ts, buf in sniffobj.capture():
                     packet_counters[iface] += 1
                     try:
@@ -1690,8 +1692,10 @@ def read_from_interface_mac_linux(network_interfaces,  # List of interface names
                         send_deque.append(pkt_info)
                         last_activity = time.monotonic()
                     
-                    # Only one packet per interface per round for fairness
-                    break
+                    # Capture up to PACKETS_PER_INTERFACE packets per round for balanced throughput
+                    packets_captured += 1
+                    if packets_captured >= PACKETS_PER_INTERFACE:
+                        break
             except Exception as e:
                 print(f"ERROR on {iface}: {e}", flush=True)
                 del sniffers[iface]
@@ -1794,9 +1798,11 @@ def read_from_interface_windows(network_interfaces,  # List of interface names o
         sys.exit(1)
 
     # --------------------------- capture loop - round robin all interfaces ----------------------------
+    PACKETS_PER_INTERFACE = 50  # Capture up to 50 packets per interface per round
     while True:
         for iface, sniffer in list(sniffers.items()):
             try:
+                packets_captured = 0
                 for ts, buf in sniffer:
                     packet_counters[iface] += 1
                     try:
@@ -1811,8 +1817,10 @@ def read_from_interface_windows(network_interfaces,  # List of interface names o
                         send_deque.append(pkt_info)
                         last_activity = time.monotonic()
                     
-                    # Only one packet per interface per round for fairness
-                    break
+                    # Capture up to PACKETS_PER_INTERFACE packets per round for balanced throughput
+                    packets_captured += 1
+                    if packets_captured >= PACKETS_PER_INTERFACE:
+                        break
             except Exception as e:
                 print(f"ERROR on {iface}: {e}", flush=True)
                 del sniffers[iface]
