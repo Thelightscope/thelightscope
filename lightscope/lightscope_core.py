@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.15"
+ls_version = "1.1.1"
 
 print(f"ls_version: {ls_version}")
 
@@ -2012,6 +2012,126 @@ def fetch_light_scope_info(url="https://thelightscope.com/ipinfo"):
 
 
 
+def sample_interface_traffic(interface, duration=5):
+    """
+    Sample traffic on an interface for a short duration and count TCP packets.
+    Returns the count of TCP packets observed.
+    """
+    import pylibpcap.base
+    try:
+        sniffobj = pylibpcap.base.Sniff(
+            interface,
+            count=-1,
+            promisc=1,
+            filter="ip and tcp",
+            buffer_size=1 << 20,
+            snaplen=256
+        )
+        
+        packet_count = 0
+        start_time = time.time()
+        
+        for plen, ts, buf in sniffobj.capture():
+            packet_count += 1
+            if time.time() - start_time >= duration:
+                break
+        
+        print(f"Interface {interface}: {packet_count} TCP packets in {duration}s")
+        return packet_count
+    except Exception as e:
+        print(f"Error sampling interface {interface}: {e}")
+        return 0
+
+def choose_busiest_interface_mac_linux(sample_duration=5):
+    """
+    Sample all interfaces and return the one with the most TCP traffic.
+    Returns (interface_name, ip_dict) for the busiest interface, or (None, None) if none found.
+    """
+    interfaces_and_ips = choose_mac_linux_interface()
+    
+    if not interfaces_and_ips:
+        print("No interfaces found")
+        return None, None
+    
+    print(f"Sampling {len(interfaces_and_ips)} interface(s) for {sample_duration} seconds each...")
+    
+    traffic_counts = {}
+    for iface in interfaces_and_ips.keys():
+        count = sample_interface_traffic(iface, duration=sample_duration)
+        traffic_counts[iface] = count
+    
+    if not traffic_counts:
+        print("No traffic detected on any interface")
+        return None, None
+    
+    # Find interface with most traffic
+    busiest_iface = max(traffic_counts, key=traffic_counts.get)
+    busiest_count = traffic_counts[busiest_iface]
+    
+    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets")
+    
+    return busiest_iface, interfaces_and_ips[busiest_iface]
+
+def sample_interface_traffic_windows(interface, duration=5):
+    """
+    Sample traffic on a Windows interface for a short duration and count TCP packets.
+    Returns the count of TCP packets observed.
+    """
+    import pcap
+    try:
+        sniffer = pcap.pcap(
+            name=interface,
+            snaplen=256,
+            promisc=True,
+            immediate=True,
+            timeout_ms=50
+        )
+        sniffer.setfilter("ip and tcp")
+        
+        packet_count = 0
+        start_time = time.time()
+        
+        for ts, buf in sniffer:
+            packet_count += 1
+            if time.time() - start_time >= duration:
+                break
+        
+        print(f"Interface {interface}: {packet_count} TCP packets in {duration}s")
+        return packet_count
+    except Exception as e:
+        print(f"Error sampling Windows interface {interface}: {e}")
+        return 0
+
+def choose_busiest_interface_windows(sample_duration=5):
+    """
+    Sample all Windows interfaces and return the one with the most TCP traffic.
+    Returns (interface_name, ip_dict) for the busiest interface, or (None, None) if none found.
+    """
+    interfaces_and_ips = choose_windows_interface()
+    
+    if not interfaces_and_ips:
+        print("No interfaces found")
+        return None, None
+    
+    print(f"Sampling {len(interfaces_and_ips)} interface(s) for {sample_duration} seconds each...")
+    
+    traffic_counts = {}
+    for iface in interfaces_and_ips.keys():
+        count = sample_interface_traffic_windows(iface, duration=sample_duration)
+        traffic_counts[iface] = count
+    
+    if not traffic_counts:
+        print("No traffic detected on any interface")
+        return None, None
+    
+    # Find interface with most traffic
+    busiest_iface = max(traffic_counts, key=traffic_counts.get)
+    busiest_count = traffic_counts[busiest_iface]
+    
+    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets")
+    
+    return busiest_iface, interfaces_and_ips[busiest_iface]
+
 def lightscope_run():
     if  platforminfo.system() != "Windows":
         try:
@@ -2087,40 +2207,127 @@ def lightscope_run():
             name="uploader"
         )
 
-        for p in (p_lscope, p_reader, p_uploader):
-            p.start()
+        # --- initial discovery & spawn for BUSIEST interface only ---
+        busiest_iface, busiest_ips = choose_busiest_interface_mac_linux(sample_duration=5)
+        
+        if not busiest_iface:
+            print("ERROR: No interfaces with traffic found. Exiting.")
+            return
+        
+        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
+        current_interface = busiest_iface
+        current_ips = busiest_ips
+        
+        # Spawn for single interface only
+        current_ctx = spawn_for_interface_mac_linux(
+            busiest_iface, 
+            busiest_ips, 
+            top_unwanted_ports_producer, 
+            shared_open_honeypots
+        )
 
-        print(f"LightScope started monitoring all interfaces")
+        print(f"Active interface: {current_interface}")
 
         # --- monitor loop ---
+        loop_count = 0
+        process_start_time = time.time()  # Track when process started for 24-hour restart
+        restart_interval = 24 * 60 * 60  # 24 hours in seconds
+        
         while True:
-            time.sleep(60)
+            time.sleep(3600)  # Check every hour
+            loop_count += 1
+            
+            # Check if 24 hours have elapsed - restart for fresh state
+            elapsed_time = time.time() - process_start_time
+            if elapsed_time >= restart_interval:
+                print(f"[+] 24-hour restart timer reached ({elapsed_time/3600:.1f} hours). Restarting for fresh state...")
+                print(f"[+] Terminating processes for interface {current_interface}")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = current_ctx[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[+] Interface process terminated. Exiting core for 24-hour restart.")
+                return  # Exit so the runner can restart with fresh state
             
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating processes for restart...")
-                for p in (p_lscope, p_reader, p_uploader):
+                print("[+] Update detected! Terminating interface process for restart...")
+                print(f"[+] Terminating processes for interface {current_interface}")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = current_ctx[pname]
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All processes terminated. Exiting core for update restart.")
-                return
+                print("[+] Interface process terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
             
-            # Try to update external network information
+            # Try to update external network information, but don't crash if it fails
             try:
                 external_network_information = fetch_light_scope_info()
             except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}")
+                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
+
+            # Every 10 hours (10 loops), re-evaluate which interface is busiest
+            if loop_count % 10 == 0:
+                print(f"[+] Re-evaluating busiest interface (every 10 hours)...")
+                new_busiest_iface, new_busiest_ips = choose_busiest_interface_mac_linux(sample_duration=5)
+                
+                if not new_busiest_iface:
+                    print(f"[+] Warning: Could not determine busiest interface, keeping current: {current_interface}")
+                    continue
+                
+                # Check if we need to switch interfaces
+                if new_busiest_iface != current_interface:
+                    print(f"[+] Interface change detected! Switching from {current_interface} to {new_busiest_iface}")
+                    
+                    # Terminate old processes
+                    print(f"[+] Terminating processes for old interface {current_interface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = current_ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                    
+                    # Spawn fresh processes for new interface
+                    print(f"[+] Spawning processes for new interface {new_busiest_iface} with IPs {new_busiest_ips}")
+                    current_ctx = spawn_for_interface_mac_linux(
+                        new_busiest_iface, 
+                        new_busiest_ips, 
+                        top_unwanted_ports_producer, 
+                        shared_open_honeypots
+                    )
+                    current_interface = new_busiest_iface
+                    current_ips = new_busiest_ips
+                else:
+                    print(f"[+] Interface {current_interface} is still the busiest, no change needed")
             
-            # Check if any process died
-            if not p_lscope.is_alive() or not p_reader.is_alive() or not p_uploader.is_alive():
-                print("[!] A process died, restarting all...")
-                for p in (p_lscope, p_reader, p_uploader):
-                    if p.is_alive():
-                        p.terminate()
-                        p.join(timeout=1)
-                print("[!] Exiting for restart...")
-                sys.exit(1)
+            # Check if IPs changed on current interface (lightweight check)
+            all_interfaces = choose_mac_linux_interface()
+            if current_interface in all_interfaces:
+                new_ips = all_interfaces[current_interface]
+                if new_ips != current_ips:
+                    print(f"[+] IP change detected on {current_interface}: {current_ips} -> {new_ips}; restarting")
+                    
+                    # Terminate old processes
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = current_ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                    
+                    # Spawn fresh with new IPs
+                    current_ctx = spawn_for_interface_mac_linux(
+                        current_interface, 
+                        new_ips, 
+                        top_unwanted_ports_producer, 
+                        shared_open_honeypots
+                    )
+                    current_ips = new_ips
+            else:
+                print(f"[+] Warning: Current interface {current_interface} no longer available. Re-evaluating...")
+                # Force re-evaluation on next loop
+                loop_count = 10
 
 
 
@@ -2194,40 +2401,112 @@ def lightscope_run():
             name="uploader"
         )
 
-        for p in (p_lscope, p_reader, p_uploader):
-            p.start()
+        # --- initial discovery & spawn for BUSIEST interface only ---
+        busiest_iface, busiest_ips = choose_busiest_interface_windows(sample_duration=5)
+        
+        if not busiest_iface:
+            print("ERROR: No interfaces with traffic found. Exiting.")
+            return
+        
+        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
+        current_interface = busiest_iface
+        current_ips = busiest_ips
+        
+        # Spawn for single interface only
+        current_ctx = spawn_for_interface_windows(busiest_iface, busiest_ips)
 
-        print(f"LightScope started monitoring all interfaces")
+        print(f"Active interface: {current_interface}")
 
         # --- monitor loop ---
+        loop_count = 0
+        process_start_time = time.time()  # Track when process started for 24-hour restart
+        restart_interval = 24 * 60 * 60  # 24 hours in seconds
+        
         while True:
-            time.sleep(60)
+            time.sleep(3600)  # Check every hour
+            loop_count += 1
+
+            # Check if 24 hours have elapsed - restart for fresh state
+            elapsed_time = time.time() - process_start_time
+            if elapsed_time >= restart_interval:
+                print(f"[+] 24-hour restart timer reached ({elapsed_time/3600:.1f} hours). Restarting for fresh state...")
+                print(f"[+] Terminating processes for interface {current_interface}")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = current_ctx[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[+] Interface process terminated. Exiting core for 24-hour restart.")
+                return  # Exit so the runner can restart with fresh state
 
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating processes for restart...")
-                for p in (p_lscope, p_reader, p_uploader):
+                print("[+] Update detected! Terminating interface process for restart...")
+                print(f"[+] Terminating processes for interface {current_interface}")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = current_ctx[pname]
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All processes terminated. Exiting core for update restart.")
-                return
+                print("[+] Interface process terminated. Exiting core for update restart.")
+                return  # Exit the core so runner can restart with new code
 
-            # Try to update external network information
+            # Try to update external network information, but don't crash if it fails
             try:
                 external_network_information = fetch_light_scope_info()
             except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}")
+                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
+
+            # Every 10 hours (10 loops), re-evaluate which interface is busiest
+            if loop_count % 10 == 0:
+                print(f"[+] Re-evaluating busiest interface (every 10 hours)...")
+                new_busiest_iface, new_busiest_ips = choose_busiest_interface_windows(sample_duration=5)
+                
+                if not new_busiest_iface:
+                    print(f"[+] Warning: Could not determine busiest interface, keeping current: {current_interface}")
+                    continue
+                
+                # Check if we need to switch interfaces
+                if new_busiest_iface != current_interface:
+                    print(f"[+] Interface change detected! Switching from {current_interface} to {new_busiest_iface}")
+                    
+                    # Terminate old processes
+                    print(f"[+] Terminating processes for old interface {current_interface}")
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = current_ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                    
+                    # Spawn fresh processes for new interface
+                    print(f"[+] Spawning processes for new interface {new_busiest_iface} with IPs {new_busiest_ips}")
+                    current_ctx = spawn_for_interface_windows(new_busiest_iface, new_busiest_ips)
+                    current_interface = new_busiest_iface
+                    current_ips = new_busiest_ips
+                else:
+                    print(f"[+] Interface {current_interface} is still the busiest, no change needed")
             
-            # Check if any process died
-            if not p_lscope.is_alive() or not p_reader.is_alive() or not p_uploader.is_alive():
-                print("[!] A process died, restarting all...")
-                for p in (p_lscope, p_reader, p_uploader):
-                    if p.is_alive():
-                        p.terminate()
-                        p.join(timeout=1)
-                print("[!] Exiting for restart...")
-                sys.exit(1)
+            # Check if IPs changed on current interface (lightweight check)
+            all_interfaces = choose_windows_interface()
+            if current_interface in all_interfaces:
+                new_ips = all_interfaces[current_interface]
+                if new_ips != current_ips:
+                    print(f"[+] IP change detected on {current_interface}: {current_ips} -> {new_ips}; restarting")
+                    
+                    # Terminate old processes
+                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                        p = current_ctx[pname]
+                        if p.is_alive():
+                            p.terminate()
+                            p.join(timeout=1)
+                    
+                    # Spawn fresh with new IPs
+                    current_ctx = spawn_for_interface_windows(current_interface, new_ips)
+                    current_ips = new_ips
+            else:
+                print(f"[+] Warning: Current interface {current_interface} no longer available. Re-evaluating...")
+                # Force re-evaluation on next loop
+                loop_count = 10
     
 
 
