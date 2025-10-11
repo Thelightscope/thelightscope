@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.0.15"
+ls_version = "1.1.3"
 
 print(f"ls_version: {ls_version}")
 
@@ -1849,6 +1849,75 @@ def choose_windows_interface():
     return result
 
 
+def discover_top_interface_windows(interfaces_and_ips):
+    """
+    Poll each Windows interface for 10 seconds and return the one with the most TCP packets.
+    
+    Args:
+        interfaces_and_ips: Dict mapping interface names to their IP addresses
+        
+    Returns:
+        Tuple of (interface_name, ips_dict) for the interface with most traffic,
+        or (None, None) if no interfaces have traffic
+    """
+    import pcap
+    
+    if not interfaces_and_ips:
+        print("discover_top_interface_windows: No interfaces to poll")
+        return None, None
+    
+    traffic_counts = {}
+    
+    print(f"discover_top_interface_windows: Polling {len(interfaces_and_ips)} interfaces for 10 seconds each...")
+    
+    for iface, ips in interfaces_and_ips.items():
+        print(f"discover_top_interface_windows: Polling {iface} for 10 seconds...")
+        packet_count = 0
+        
+        try:
+            # Open capture on this interface
+            sniffer = pcap.pcap(
+                name=iface,
+                snaplen=256,
+                promisc=True,
+                immediate=True,
+                timeout_ms=50
+            )
+            
+            # Set filter for TCP packets
+            sniffer.setfilter("ip and tcp")
+            
+            start_time = time.time()
+            end_time = start_time + 10  # Poll for 10 seconds
+            
+            # Count packets for 10 seconds
+            for ts, buf in sniffer:
+                packet_count += 1
+                
+                # Check if 10 seconds have elapsed
+                if time.time() >= end_time:
+                    break
+            
+            traffic_counts[iface] = packet_count
+            print(f"discover_top_interface_windows: {iface} had {packet_count} TCP packets in 10 seconds")
+            
+        except Exception as e:
+            print(f"discover_top_interface_windows: Error polling {iface}: {e}")
+            traffic_counts[iface] = 0
+    
+    # Find interface with most traffic
+    if not traffic_counts:
+        print("discover_top_interface_windows: No traffic data collected")
+        return None, None
+    
+    top_interface = max(traffic_counts, key=traffic_counts.get)
+    top_count = traffic_counts[top_interface]
+    
+    print(f"discover_top_interface_windows: Selected {top_interface} with {top_count} packets")
+    
+    return top_interface, interfaces_and_ips[top_interface]
+
+
 
 import psutil
 import socket
@@ -1901,6 +1970,73 @@ def choose_mac_linux_interface():
             }
 
     return result
+
+
+def discover_top_interface(interfaces_and_ips):
+    """
+    Poll each interface for 10 seconds and return the one with the most TCP packets.
+    
+    Args:
+        interfaces_and_ips: Dict mapping interface names to their IP addresses
+        
+    Returns:
+        Tuple of (interface_name, ips_dict) for the interface with most traffic,
+        or (None, None) if no interfaces have traffic
+    """
+    import pylibpcap.base
+    
+    if not interfaces_and_ips:
+        print("discover_top_interface: No interfaces to poll")
+        return None, None
+    
+    traffic_counts = {}
+    
+    print(f"discover_top_interface: Polling {len(interfaces_and_ips)} interfaces for 10 seconds each...")
+    
+    for iface, ips in interfaces_and_ips.items():
+        print(f"discover_top_interface: Polling {iface} for 10 seconds...")
+        packet_count = 0
+        
+        try:
+            # Open capture on this interface
+            sniffobj = pylibpcap.base.Sniff(
+                iface,
+                count=-1,
+                promisc=1,
+                filter="ip and tcp",
+                buffer_size=1 << 20,
+                snaplen=256
+            )
+            
+            start_time = time.time()
+            end_time = start_time + 10  # Poll for 10 seconds
+            
+            # Count packets for 10 seconds
+            for plen, ts, buf in sniffobj.capture():
+                packet_count += 1
+                
+                # Check if 10 seconds have elapsed
+                if time.time() >= end_time:
+                    break
+            
+            traffic_counts[iface] = packet_count
+            print(f"discover_top_interface: {iface} had {packet_count} TCP packets in 10 seconds")
+            
+        except Exception as e:
+            print(f"discover_top_interface: Error polling {iface}: {e}")
+            traffic_counts[iface] = 0
+    
+    # Find interface with most traffic
+    if not traffic_counts:
+        print("discover_top_interface: No traffic data collected")
+        return None, None
+    
+    top_interface = max(traffic_counts, key=traffic_counts.get)
+    top_count = traffic_counts[top_interface]
+    
+    print(f"discover_top_interface: Selected {top_interface} with {top_count} packets")
+    
+    return top_interface, interfaces_and_ips[top_interface]
 
         
 def check_ip_is_private(ip_str):
@@ -2058,82 +2194,106 @@ def lightscope_run():
                 "upload_process":             p_uploader,
             }
 
-        # --- initial discovery & spawn ---
-        interfaces_and_ips = choose_mac_linux_interface()
-        processes_per_interface = {}
-        for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_mac_linux(iface, ips,top_unwanted_ports_producer, shared_open_honeypots)
-
-        print("Live interfaces:", list(processes_per_interface))
+        # --- initial discovery & spawn (SINGLE INTERFACE ONLY) ---
+        all_interfaces = choose_mac_linux_interface()
+        
+        # Discover the top interface based on traffic
+        print("Discovering interface with most TCP traffic...")
+        active_interface, active_ips = discover_top_interface(all_interfaces)
+        
+        if not active_interface:
+            print("ERROR: No active interfaces found. Exiting.")
+            return
+        
+        print(f"Selected interface: {active_interface} with IPs: {active_ips}")
+        
+        # Spawn processes for ONLY the top interface
+        active_context = spawn_for_interface_mac_linux(active_interface, active_ips, top_unwanted_ports_producer, shared_open_honeypots)
+        
+        print(f"Monitoring single interface: {active_interface}")
+        
+        # Track start time for 24-hour restart
+        core_start_time = time.time()
+        restart_interval = 24 * 60 * 60  # 24 hours in seconds
+        print(f"LightScope core started at {time.ctime(core_start_time)}, will restart after 24 hours")
 
         # --- monitor loop ---
         while True:
-            time.sleep(60)  # Check every 60 seconds instead of busy waiting
+            time.sleep(6000)  # Check every 60 seconds
+            
+            # Check if 24 hours have elapsed - time for scheduled restart
+            current_time = time.time()
+            elapsed_time = current_time - core_start_time
+            if elapsed_time >= restart_interval:
+                print(f"[+] 24-hour restart interval reached (running for {elapsed_time/3600:.1f} hours)")
+                print("[+] Terminating interface processes for scheduled restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = active_context[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting for scheduled restart.")
+                return  # Exit cleanly - runner will restart us
             
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating all interface processes for restart...")
-                # Terminate all interface processes
-                for iface, ctx in processes_per_interface.items():
-                    print(f"[+] Terminating processes for interface {iface}")
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
+                print("[+] Update detected! Terminating interface processes for restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = active_context[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
                 print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
             
+            # Check for interface changes
             new_mapping = choose_mac_linux_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
             
             # Try to update external network information, but don't crash if it fails
             try:
                 external_network_information = fetch_light_scope_info()
             except Exception as e:
                 print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
+            
+            # Check if the active interface still exists and has the same IPs
+            needs_rediscovery = False
+            
+            if active_interface not in new_mapping:
+                print(f"[+] Active interface {active_interface!r} disappeared. Need to rediscover.")
+                needs_rediscovery = True
+            elif new_mapping[active_interface] != active_ips:
+                print(f"[+] Active interface {active_interface!r} IPs changed: {active_ips} -> {new_mapping[active_interface]}. Need to rediscover.")
+                needs_rediscovery = True
+            elif set(new_mapping.keys()) != set(all_interfaces.keys()):
+                print(f"[+] Interface list changed (new or removed interfaces detected). Need to rediscover.")
+                needs_rediscovery = True
+            
+            if needs_rediscovery:
+                print("[+] Terminating current interface processes...")
                 for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
+                    p = active_context[pname]
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
-
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_mac_linux(same, new_ips, top_unwanted_ports_producer, shared_open_honeypots)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_mac_linux(born, ips, top_unwanted_ports_producer, shared_open_honeypots)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
+                print("[+] All processes terminated. Rediscovering top interface...")
+                
+                # Rediscover the top interface
+                all_interfaces = new_mapping
+                active_interface, active_ips = discover_top_interface(all_interfaces)
+                
+                if not active_interface:
+                    print("ERROR: No active interfaces found after rediscovery. Exiting.")
+                    return
+                
+                print(f"[+] Selected new interface: {active_interface} with IPs: {active_ips}")
+                
+                # Spawn fresh processes for the new top interface
+                active_context = spawn_for_interface_mac_linux(active_interface, active_ips, top_unwanted_ports_producer, shared_open_honeypots)
+                
+                print(f"[+] Now monitoring: {active_interface}")
+            else:
+                # Update our record of all interfaces for next comparison
+                all_interfaces = new_mapping
 
 
 
@@ -2216,82 +2376,106 @@ def lightscope_run():
                 "upload_process":             p_uploader,
             }
 
-        # --- initial discovery & spawn ---
-        interfaces_and_ips = choose_windows_interface()
-        processes_per_interface = {}
-        for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_windows(iface, ips)
-
-        print("Live interfaces:", list(processes_per_interface))
+        # --- initial discovery & spawn (SINGLE INTERFACE ONLY) ---
+        all_interfaces = choose_windows_interface()
+        
+        # Discover the top interface based on traffic
+        print("Discovering interface with most TCP traffic...")
+        active_interface, active_ips = discover_top_interface_windows(all_interfaces)
+        
+        if not active_interface:
+            print("ERROR: No active interfaces found. Exiting.")
+            return
+        
+        print(f"Selected interface: {active_interface} with IPs: {active_ips}")
+        
+        # Spawn processes for ONLY the top interface
+        active_context = spawn_for_interface_windows(active_interface, active_ips)
+        
+        print(f"Monitoring single interface: {active_interface}")
+        
+        # Track start time for 24-hour restart
+        core_start_time = time.time()
+        restart_interval = 24 * 60 * 60  # 24 hours in seconds
+        print(f"LightScope core started at {time.ctime(core_start_time)}, will restart after 24 hours")
 
         # --- monitor loop ---
         while True:
-            time.sleep(60)
+            time.sleep(60)  # Check every 60 seconds
+
+            # Check if 24 hours have elapsed - time for scheduled restart
+            current_time = time.time()
+            elapsed_time = current_time - core_start_time
+            if elapsed_time >= restart_interval:
+                print(f"[+] 24-hour restart interval reached (running for {elapsed_time/3600:.1f} hours)")
+                print("[+] Terminating interface processes for scheduled restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = active_context[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
+                print("[+] All interface processes terminated. Exiting for scheduled restart.")
+                return  # Exit cleanly - runner will restart us
 
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating all interface processes for restart...")
-                # Terminate all interface processes
-                for iface, ctx in processes_per_interface.items():
-                    print(f"[+] Terminating processes for interface {iface}")
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
+                print("[+] Update detected! Terminating interface processes for restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
+                    p = active_context[pname]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=1)
                 print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
 
+            # Check for interface changes
+            new_mapping = choose_windows_interface()
+            
             # Try to update external network information, but don't crash if it fails
             try:
                 external_network_information = fetch_light_scope_info()
             except Exception as e:
                 print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-                
-            new_mapping = choose_windows_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
+            
+            # Check if the active interface still exists and has the same IPs
+            needs_rediscovery = False
+            
+            if active_interface not in new_mapping:
+                print(f"[+] Active interface {active_interface!r} disappeared. Need to rediscover.")
+                needs_rediscovery = True
+            elif new_mapping[active_interface] != active_ips:
+                print(f"[+] Active interface {active_interface!r} IPs changed: {active_ips} -> {new_mapping[active_interface]}. Need to rediscover.")
+                needs_rediscovery = True
+            elif set(new_mapping.keys()) != set(all_interfaces.keys()):
+                print(f"[+] Interface list changed (new or removed interfaces detected). Need to rediscover.")
+                needs_rediscovery = True
+            
+            if needs_rediscovery:
+                print("[+] Terminating current interface processes...")
                 for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
+                    p = active_context[pname]
                     if p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
-
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_windows(same, new_ips)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_windows(born, ips)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
+                print("[+] All processes terminated. Rediscovering top interface...")
+                
+                # Rediscover the top interface
+                all_interfaces = new_mapping
+                active_interface, active_ips = discover_top_interface_windows(all_interfaces)
+                
+                if not active_interface:
+                    print("ERROR: No active interfaces found after rediscovery. Exiting.")
+                    return
+                
+                print(f"[+] Selected new interface: {active_interface} with IPs: {active_ips}")
+                
+                # Spawn fresh processes for the new top interface
+                active_context = spawn_for_interface_windows(active_interface, active_ips)
+                
+                print(f"[+] Now monitoring: {active_interface}")
+            else:
+                # Update our record of all interfaces for next comparison
+                all_interfaces = new_mapping
     
 
 
