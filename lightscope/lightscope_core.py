@@ -2168,19 +2168,27 @@ def lightscope_run():
         hp_uploader.start()
         # end honeypot
 
-        # --- initial discovery & spawn ONE set of processes for ALL interfaces ---
-        interfaces_and_ips = choose_mac_linux_interface()
-        print(f"Discovered {len(interfaces_and_ips)} interfaces: {list(interfaces_and_ips.keys())}")
+        # --- initial discovery & spawn for BUSIEST interface only ---
+        busiest_iface, busiest_ips = choose_busiest_interface_mac_linux(sample_duration=5)
+        
+        if not busiest_iface:
+            print("ERROR: No interfaces with traffic found. Exiting.")
+            return
+        
+        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
+        current_interface = busiest_iface
+        current_ips = busiest_ips
         
         # Create pipes
         unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
         up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
 
-        # Create Ports instance with ALL interfaces
+        # Create Ports instance for busiest interface
         port_status = Ports(
             up_producer,
-            interfaces_and_ips,  # Pass dict of all interfaces
+            {busiest_iface: busiest_ips},  # Pass single interface as dict
             False,
+            busiest_iface,
             external_network_information,
             config_settings,
             system_info,
@@ -2194,10 +2202,10 @@ def lightscope_run():
             args=(unproc_consumer,),
             name="lightscope"
         )
-        # Spawn ONE process for reading from ALL interfaces
+        # Spawn ONE process for reading from busiest interface
         p_reader = multiprocessing.Process(
             target=read_from_interface_mac_linux,
-            args=(interfaces_and_ips, unproc_producer),  # Pass all interfaces
+            args=(busiest_iface, unproc_producer),  # Pass single interface
             name="reader"
         )
         # Spawn ONE process for uploading
@@ -2206,25 +2214,18 @@ def lightscope_run():
             args=(up_consumer,),
             name="uploader"
         )
-
-        # --- initial discovery & spawn for BUSIEST interface only ---
-        busiest_iface, busiest_ips = choose_busiest_interface_mac_linux(sample_duration=5)
         
-        if not busiest_iface:
-            print("ERROR: No interfaces with traffic found. Exiting.")
-            return
+        # Start all processes
+        p_lscope.start()
+        p_reader.start()
+        p_uploader.start()
         
-        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
-        current_interface = busiest_iface
-        current_ips = busiest_ips
-        
-        # Spawn for single interface only
-        current_ctx = spawn_for_interface_mac_linux(
-            busiest_iface, 
-            busiest_ips, 
-            top_unwanted_ports_producer, 
-            shared_open_honeypots
-        )
+        # Store in context for later management
+        current_ctx = {
+            "lightscope_process": p_lscope,
+            "read_from_interface_process": p_reader,
+            "upload_process": p_uploader
+        }
 
         print(f"Active interface: {current_interface}")
 
@@ -2291,12 +2292,51 @@ def lightscope_run():
                     
                     # Spawn fresh processes for new interface
                     print(f"[+] Spawning processes for new interface {new_busiest_iface} with IPs {new_busiest_ips}")
-                    current_ctx = spawn_for_interface_mac_linux(
-                        new_busiest_iface, 
-                        new_busiest_ips, 
-                        top_unwanted_ports_producer, 
+                    
+                    # Create new pipes
+                    unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                    up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+
+                    # Create new Ports instance
+                    port_status = Ports(
+                        up_producer,
+                        {new_busiest_iface: new_busiest_ips},
+                        False,
+                        new_busiest_iface,
+                        external_network_information,
+                        config_settings,
+                        system_info,
+                        top_unwanted_ports_producer,
                         shared_open_honeypots
                     )
+
+                    # Spawn new processes
+                    p_lscope = multiprocessing.Process(
+                        target=port_status.packet_handler,
+                        args=(unproc_consumer,),
+                        name="lightscope"
+                    )
+                    p_reader = multiprocessing.Process(
+                        target=read_from_interface_mac_linux,
+                        args=(new_busiest_iface, unproc_producer),
+                        name="reader"
+                    )
+                    p_uploader = multiprocessing.Process(
+                        target=send_data,
+                        args=(up_consumer,),
+                        name="uploader"
+                    )
+                    
+                    p_lscope.start()
+                    p_reader.start()
+                    p_uploader.start()
+                    
+                    current_ctx = {
+                        "lightscope_process": p_lscope,
+                        "read_from_interface_process": p_reader,
+                        "upload_process": p_uploader
+                    }
+                    
                     current_interface = new_busiest_iface
                     current_ips = new_busiest_ips
                 else:
@@ -2317,12 +2357,46 @@ def lightscope_run():
                             p.join(timeout=1)
                     
                     # Spawn fresh with new IPs
-                    current_ctx = spawn_for_interface_mac_linux(
-                        current_interface, 
-                        new_ips, 
-                        top_unwanted_ports_producer, 
+                    unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                    up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+
+                    port_status = Ports(
+                        up_producer,
+                        {current_interface: new_ips},
+                        False,
+                        current_interface,
+                        external_network_information,
+                        config_settings,
+                        system_info,
+                        top_unwanted_ports_producer,
                         shared_open_honeypots
                     )
+
+                    p_lscope = multiprocessing.Process(
+                        target=port_status.packet_handler,
+                        args=(unproc_consumer,),
+                        name="lightscope"
+                    )
+                    p_reader = multiprocessing.Process(
+                        target=read_from_interface_mac_linux,
+                        args=(current_interface, unproc_producer),
+                        name="reader"
+                    )
+                    p_uploader = multiprocessing.Process(
+                        target=send_data,
+                        args=(up_consumer,),
+                        name="uploader"
+                    )
+                    
+                    p_lscope.start()
+                    p_reader.start()
+                    p_uploader.start()
+                    
+                    current_ctx = {
+                        "lightscope_process": p_lscope,
+                        "read_from_interface_process": p_reader,
+                        "upload_process": p_uploader
+                    }
                     current_ips = new_ips
             else:
                 print(f"[+] Warning: Current interface {current_interface} no longer available. Re-evaluating...")
@@ -2362,19 +2436,27 @@ def lightscope_run():
         hp_uploader.start()
         # end honeypot
 
-        # --- initial discovery & spawn ONE set of processes for ALL interfaces ---
-        interfaces_and_ips = choose_windows_interface()
-        print(f"Discovered {len(interfaces_and_ips)} interfaces: {list(interfaces_and_ips.keys())}")
+        # --- initial discovery & spawn for BUSIEST interface only ---
+        busiest_iface, busiest_ips = choose_busiest_interface_windows(sample_duration=5)
+        
+        if not busiest_iface:
+            print("ERROR: No interfaces with traffic found. Exiting.")
+            return
+        
+        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
+        current_interface = busiest_iface
+        current_ips = busiest_ips
         
         # Create pipes
         unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
         up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
 
-        # Create Ports instance with ALL interfaces
+        # Create Ports instance for busiest interface
         port_status = Ports(
             up_producer,
-            interfaces_and_ips,  # Pass dict of all interfaces
+            {busiest_iface: busiest_ips},  # Pass single interface as dict
             False,
+            busiest_iface,
             external_network_information,
             config_settings,
             system_info,
@@ -2388,10 +2470,10 @@ def lightscope_run():
             args=(unproc_consumer,),
             name="lightscope"
         )
-        # Spawn ONE process for reading from ALL interfaces
+        # Spawn ONE process for reading from busiest interface
         p_reader = multiprocessing.Process(
             target=read_from_interface_windows,
-            args=(interfaces_and_ips, unproc_producer),  # Pass all interfaces
+            args=(busiest_iface, unproc_producer),  # Pass single interface
             name="reader"
         )
         # Spawn ONE process for uploading
@@ -2400,20 +2482,18 @@ def lightscope_run():
             args=(up_consumer,),
             name="uploader"
         )
-
-        # --- initial discovery & spawn for BUSIEST interface only ---
-        busiest_iface, busiest_ips = choose_busiest_interface_windows(sample_duration=5)
         
-        if not busiest_iface:
-            print("ERROR: No interfaces with traffic found. Exiting.")
-            return
+        # Start all processes
+        p_lscope.start()
+        p_reader.start()
+        p_uploader.start()
         
-        print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
-        current_interface = busiest_iface
-        current_ips = busiest_ips
-        
-        # Spawn for single interface only
-        current_ctx = spawn_for_interface_windows(busiest_iface, busiest_ips)
+        # Store in context for later management
+        current_ctx = {
+            "lightscope_process": p_lscope,
+            "read_from_interface_process": p_reader,
+            "upload_process": p_uploader
+        }
 
         print(f"Active interface: {current_interface}")
 
@@ -2480,7 +2560,51 @@ def lightscope_run():
                     
                     # Spawn fresh processes for new interface
                     print(f"[+] Spawning processes for new interface {new_busiest_iface} with IPs {new_busiest_ips}")
-                    current_ctx = spawn_for_interface_windows(new_busiest_iface, new_busiest_ips)
+                    
+                    # Create new pipes
+                    unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                    up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+
+                    # Create new Ports instance
+                    port_status = Ports(
+                        up_producer,
+                        {new_busiest_iface: new_busiest_ips},
+                        False,
+                        new_busiest_iface,
+                        external_network_information,
+                        config_settings,
+                        system_info,
+                        top_unwanted_ports_producer,
+                        shared_open_honeypots
+                    )
+
+                    # Spawn new processes
+                    p_lscope = multiprocessing.Process(
+                        target=port_status.packet_handler,
+                        args=(unproc_consumer,),
+                        name="lightscope"
+                    )
+                    p_reader = multiprocessing.Process(
+                        target=read_from_interface_windows,
+                        args=(new_busiest_iface, unproc_producer),
+                        name="reader"
+                    )
+                    p_uploader = multiprocessing.Process(
+                        target=send_data,
+                        args=(up_consumer,),
+                        name="uploader"
+                    )
+                    
+                    p_lscope.start()
+                    p_reader.start()
+                    p_uploader.start()
+                    
+                    current_ctx = {
+                        "lightscope_process": p_lscope,
+                        "read_from_interface_process": p_reader,
+                        "upload_process": p_uploader
+                    }
+                    
                     current_interface = new_busiest_iface
                     current_ips = new_busiest_ips
                 else:
@@ -2501,7 +2625,46 @@ def lightscope_run():
                             p.join(timeout=1)
                     
                     # Spawn fresh with new IPs
-                    current_ctx = spawn_for_interface_windows(current_interface, new_ips)
+                    unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                    up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+
+                    port_status = Ports(
+                        up_producer,
+                        {current_interface: new_ips},
+                        False,
+                        current_interface,
+                        external_network_information,
+                        config_settings,
+                        system_info,
+                        top_unwanted_ports_producer,
+                        shared_open_honeypots
+                    )
+
+                    p_lscope = multiprocessing.Process(
+                        target=port_status.packet_handler,
+                        args=(unproc_consumer,),
+                        name="lightscope"
+                    )
+                    p_reader = multiprocessing.Process(
+                        target=read_from_interface_windows,
+                        args=(current_interface, unproc_producer),
+                        name="reader"
+                    )
+                    p_uploader = multiprocessing.Process(
+                        target=send_data,
+                        args=(up_consumer,),
+                        name="uploader"
+                    )
+                    
+                    p_lscope.start()
+                    p_reader.start()
+                    p_uploader.start()
+                    
+                    current_ctx = {
+                        "lightscope_process": p_lscope,
+                        "read_from_interface_process": p_reader,
+                        "upload_process": p_uploader
+                    }
                     current_ips = new_ips
             else:
                 print(f"[+] Warning: Current interface {current_interface} no longer available. Re-evaluating...")
