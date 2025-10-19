@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.1.3"
+ls_version = "1.1.4"
 
 print(f"ls_version: {ls_version}")
 
@@ -1857,6 +1857,7 @@ def choose_windows_interface():
     # 2) build a GUID → {ipv4, ipv6} map from WMI
     c = wmi.WMI()
     guid_ip_map = {}
+    adapter_name_map = {}  # Map GUID to adapter name for filtering
     for cfg in c.Win32_NetworkAdapterConfiguration():
         if not cfg.SettingID:
             continue
@@ -1873,13 +1874,27 @@ def choose_windows_interface():
             else:
                 v6.append(ip)
         guid_ip_map[guid] = {'ipv4': v4, 'ipv6': v6}
+        # Store adapter description for filtering
+        adapter_name_map[guid] = cfg.Description or ""
 
-    # 3) produce final mapping from NPF name → its IP lists
+    # 3) produce final mapping from NPF name → its IP lists, filtering virtual interfaces
     result = {}
     for dev in devs:
+        # Skip virtual interfaces based on device name
+        if is_virtual_interface(dev):
+            print(f"Skipping virtual interface: {dev}")
+            continue
+            
         m = re.search(r'\{([0-9A-Fa-f-]+)\}', dev)
         if m:
             guid = m.group(1).lower()
+            
+            # Also check adapter description for virtual patterns
+            adapter_desc = adapter_name_map.get(guid, "")
+            if is_virtual_interface(adapter_desc):
+                print(f"Skipping virtual interface (by adapter name): {dev} ({adapter_desc})")
+                continue
+            
             result[dev] = guid_ip_map.get(guid, {'ipv4': [], 'ipv6': []})
         else:
             result[dev] = {'ipv4': [], 'ipv6': []}
@@ -1961,6 +1976,46 @@ import psutil
 import socket
 import time
 
+def is_virtual_interface(interface_name):
+    """
+    Check if interface is a virtual/container/VM interface that should be excluded.
+    Returns True if the interface should be filtered out.
+    """
+    # Convert to lowercase for case-insensitive matching
+    name_lower = interface_name.lower()
+    
+    # Patterns for virtual/container interfaces to exclude
+    virtual_patterns = [
+        'docker',      # Docker bridge
+        'br-',         # Docker/Linux bridges
+        'veth',        # Virtual ethernet pairs (Docker/containers)
+        'lxc',         # LXC containers
+        'lxdbr',       # LXD bridge
+        'virbr',       # libvirt/KVM virtual bridge
+        'vnet',        # libvirt/KVM virtual network
+        'vbox',        # VirtualBox
+        'vmnet',       # VMware
+        'vethernet',   # Hyper-V (Windows)
+        'cni',         # Container Network Interface (Kubernetes/Podman)
+        'podman',      # Podman
+        'flannel',     # Kubernetes Flannel
+        'weave',       # Kubernetes Weave
+        'calico',      # Kubernetes Calico
+        'tap',         # TAP devices (OpenStack/QEMU)
+        'qbr',         # OpenStack quantum bridge
+        'qvb',         # OpenStack quantum veth bridge-side
+        'qvo',         # OpenStack quantum veth ovs-side
+        'tun',         # TUN devices (VPN/virtualization)
+    ]
+    
+    # Check if interface name starts with any virtual pattern
+    for pattern in virtual_patterns:
+        if name_lower.startswith(pattern):
+            return True
+    
+    return False
+
+
 def choose_mac_linux_interface():
     '''return {'en0':{
           'ipv4': ['10.78.180.31'],
@@ -1969,6 +2024,7 @@ def choose_mac_linux_interface():
     """
     Returns a dict mapping each up network interface
     to a dict containing its non-loopback IPv4 and IPv6 addresses.
+    Excludes virtual/container interfaces (Docker, VMs, etc.).
     Example return value:
       {
         'en0': {
@@ -1988,6 +2044,11 @@ def choose_mac_linux_interface():
 
     for iface, s in stats.items():
         if not s.isup:
+            continue
+        
+        # Skip virtual/container interfaces
+        if is_virtual_interface(iface):
+            print(f"Skipping virtual interface: {iface}")
             continue
 
         ipv4s = [
@@ -2269,6 +2330,12 @@ def choose_busiest_interface_windows(sample_duration=5):
     return busiest_iface, interfaces_and_ips[busiest_iface]
 
 def lightscope_run():
+    # Sleep for 1 minute at startup to prevent rapid restart loops
+    # This protects against bugs that cause immediate crashes
+    print("LightScope starting - waiting 60 seconds before initialization...")
+    time.sleep(60)
+    print("Initialization proceeding...")
+    
     if  platforminfo.system() != "Windows":
         try:
             from systemd import daemon
@@ -2357,41 +2424,16 @@ def lightscope_run():
         p_uploader.start()
         
         # Store in context for later management
-        current_ctx = {
+        active_context = {
             "lightscope_process": p_lscope,
             "read_from_interface_process": p_reader,
             "upload_process": p_uploader
         }
-
-            for p in (p_lscope, p_reader, p_uploader):
-                p.start()
-
-            return {
-                "internal_ips":           internal_ips,
-                "pipes": {
-                    "unprocessed": (unproc_consumer, unproc_producer),
-                    "upload":      (up_consumer, up_producer),
-                },
-                "lightscope_process":         p_lscope,
-                "read_from_interface_process": p_reader,
-                "upload_process":             p_uploader,
-            }
-
-        # --- initial discovery & spawn (SINGLE INTERFACE ONLY) ---
-        all_interfaces = choose_mac_linux_interface()
         
-        # Discover the top interface based on traffic
-        print("Discovering interface with most TCP traffic...")
-        active_interface, active_ips = discover_top_interface(all_interfaces)
-        
-        if not active_interface:
-            print("ERROR: No active interfaces found. Exiting.")
-            return
-        
-        print(f"Selected interface: {active_interface} with IPs: {active_ips}")
-        
-        # Spawn processes for ONLY the top interface
-        active_context = spawn_for_interface_mac_linux(active_interface, active_ips, top_unwanted_ports_producer, shared_open_honeypots)
+        # Set up variables for monitoring loop
+        active_interface = busiest_iface
+        active_ips = busiest_ips
+        all_interfaces = {busiest_iface: busiest_ips}  # Track initial state
         
         print(f"Monitoring single interface: {active_interface}")
         
@@ -2475,7 +2517,51 @@ def lightscope_run():
                 print(f"[+] Selected new interface: {active_interface} with IPs: {active_ips}")
                 
                 # Spawn fresh processes for the new top interface
-                active_context = spawn_for_interface_mac_linux(active_interface, active_ips, top_unwanted_ports_producer, shared_open_honeypots)
+                # Create new pipes
+                unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+                
+                # Create new Ports instance
+                port_status = Ports(
+                    up_producer,
+                    {active_interface: active_ips},
+                    False,
+                    active_interface,
+                    external_network_information,
+                    config_settings,
+                    system_info,
+                    top_unwanted_ports_producer,
+                    shared_open_honeypots
+                )
+                
+                # Spawn new processes
+                p_lscope = multiprocessing.Process(
+                    target=port_status.packet_handler,
+                    args=(unproc_consumer,),
+                    name="lightscope"
+                )
+                p_reader = multiprocessing.Process(
+                    target=read_from_interface_mac_linux,
+                    args=(active_interface, unproc_producer),
+                    name="reader"
+                )
+                p_uploader = multiprocessing.Process(
+                    target=send_data,
+                    args=(up_consumer,),
+                    name="uploader"
+                )
+                
+                # Start all processes
+                p_lscope.start()
+                p_reader.start()
+                p_uploader.start()
+                
+                # Store in context
+                active_context = {
+                    "lightscope_process": p_lscope,
+                    "read_from_interface_process": p_reader,
+                    "upload_process": p_uploader
+                }
                 
                 print(f"[+] Now monitoring: {active_interface}")
             else:
@@ -2568,41 +2654,16 @@ def lightscope_run():
         p_uploader.start()
         
         # Store in context for later management
-        current_ctx = {
+        active_context = {
             "lightscope_process": p_lscope,
             "read_from_interface_process": p_reader,
             "upload_process": p_uploader
         }
-
-            for p in (p_lscope, p_reader, p_uploader):
-                p.start()
-
-            return {
-                "internal_ips":           internal_ips,
-                "pipes": {
-                    "unprocessed": (unproc_consumer, unproc_producer),
-                    "upload":      (up_consumer, up_producer),
-                },
-                "lightscope_process":         p_lscope,
-                "read_from_interface_process": p_reader,
-                "upload_process":             p_uploader,
-            }
-
-        # --- initial discovery & spawn (SINGLE INTERFACE ONLY) ---
-        all_interfaces = choose_windows_interface()
         
-        # Discover the top interface based on traffic
-        print("Discovering interface with most TCP traffic...")
-        active_interface, active_ips = discover_top_interface_windows(all_interfaces)
-        
-        if not active_interface:
-            print("ERROR: No active interfaces found. Exiting.")
-            return
-        
-        print(f"Selected interface: {active_interface} with IPs: {active_ips}")
-        
-        # Spawn processes for ONLY the top interface
-        active_context = spawn_for_interface_windows(active_interface, active_ips)
+        # Set up variables for monitoring loop
+        active_interface = busiest_iface
+        active_ips = busiest_ips
+        all_interfaces = {busiest_iface: busiest_ips}  # Track initial state
         
         print(f"Monitoring single interface: {active_interface}")
         
@@ -2686,7 +2747,51 @@ def lightscope_run():
                 print(f"[+] Selected new interface: {active_interface} with IPs: {active_ips}")
                 
                 # Spawn fresh processes for the new top interface
-                active_context = spawn_for_interface_windows(active_interface, active_ips)
+                # Create new pipes
+                unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
+                up_consumer, up_producer = multiprocessing.Pipe(duplex=False)
+                
+                # Create new Ports instance
+                port_status = Ports(
+                    up_producer,
+                    {active_interface: active_ips},
+                    False,
+                    active_interface,
+                    external_network_information,
+                    config_settings,
+                    system_info,
+                    top_unwanted_ports_producer,
+                    shared_open_honeypots
+                )
+                
+                # Spawn new processes
+                p_lscope = multiprocessing.Process(
+                    target=port_status.packet_handler,
+                    args=(unproc_consumer,),
+                    name="lightscope"
+                )
+                p_reader = multiprocessing.Process(
+                    target=read_from_interface_windows,
+                    args=(active_interface, unproc_producer),
+                    name="reader"
+                )
+                p_uploader = multiprocessing.Process(
+                    target=send_data,
+                    args=(up_consumer,),
+                    name="uploader"
+                )
+                
+                # Start all processes
+                p_lscope.start()
+                p_reader.start()
+                p_uploader.start()
+                
+                # Store in context
+                active_context = {
+                    "lightscope_process": p_lscope,
+                    "read_from_interface_process": p_reader,
+                    "upload_process": p_uploader
+                }
                 
                 print(f"[+] Now monitoring: {active_interface}")
             else:
