@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.1.4"
+ls_version = "1.2.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -2329,7 +2329,56 @@ def choose_busiest_interface_windows(sample_duration=5):
     
     return busiest_iface, interfaces_and_ips[busiest_iface]
 
+def cleanup_orphaned_processes():
+    """Kill any orphaned LightScope processes from previous runs"""
+    try:
+        current_pid = os.getpid()
+        print(f"Cleaning up orphaned processes (current PID: {current_pid})...")
+        
+        killed_count = 0
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                # Skip ourselves
+                if proc.info['pid'] == current_pid:
+                    continue
+                
+                # Check if it's a Python process running LightScope
+                cmdline = proc.info['cmdline']
+                if cmdline and isinstance(cmdline, list):
+                    cmdline_str = ' '.join(cmdline)
+                    # Look for lightscope_core.py or lightscope-runner.py in the command line
+                    if 'lightscope_core' in cmdline_str.lower() or 'lightscope-runner' in cmdline_str.lower():
+                        # But don't kill the runner process
+                        if 'lightscope-runner' in cmdline_str.lower():
+                            continue
+                        
+                        print(f"Found orphaned LightScope process: PID {proc.info['pid']}, killing...")
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except psutil.TimeoutExpired:
+                            print(f"Process {proc.info['pid']} didn't terminate, killing forcefully...")
+                            proc.kill()
+                        killed_count += 1
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                # Process died or we can't access it
+                continue
+        
+        if killed_count > 0:
+            print(f"Cleaned up {killed_count} orphaned process(es)")
+        else:
+            print("No orphaned processes found")
+            
+    except Exception as e:
+        print(f"Error during orphaned process cleanup: {e}")
+        # Don't fail startup if cleanup fails
+
+
 def lightscope_run():
+    # Clean up any orphaned processes from previous runs first
+    cleanup_orphaned_processes()
+    
     # Sleep for 1 minute at startup to prevent rapid restart loops
     # This protects against bugs that cause immediate crashes
     print("LightScope starting - waiting 60 seconds before initialization...")
@@ -2423,11 +2472,13 @@ def lightscope_run():
         p_reader.start()
         p_uploader.start()
         
-        # Store in context for later management
+        # Store in context for later management (including honeypot processes)
         active_context = {
             "lightscope_process": p_lscope,
             "read_from_interface_process": p_reader,
-            "upload_process": p_uploader
+            "upload_process": p_uploader,
+            "honeypot_process": hp_proc,
+            "honeypot_uploader_process": hp_uploader
         }
         
         # Set up variables for monitoring loop
@@ -2455,24 +2506,26 @@ def lightscope_run():
             elapsed_time = current_time - core_start_time
             if elapsed_time >= restart_interval:
                 print(f"[+] 24-hour restart interval reached (running for {elapsed_time/3600:.1f} hours)")
-                print("[+] Terminating interface processes for scheduled restart...")
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                print("[+] Terminating all processes for scheduled restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process", 
+                             "honeypot_process", "honeypot_uploader_process"):
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting for scheduled restart.")
+                print("[+] All processes terminated. Exiting for scheduled restart.")
                 return  # Exit cleanly - runner will restart us
             
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating interface processes for restart...")
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                print("[+] Update detected! Terminating all processes for restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process", 
+                             "honeypot_process", "honeypot_uploader_process"):
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting core for update restart.")
+                print("[+] All processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
             
             # Check for interface changes
@@ -2499,12 +2552,13 @@ def lightscope_run():
             
             if needs_rediscovery:
                 print("[+] Terminating current interface processes...")
+                # Only terminate interface processes, NOT honeypot processes during interface changes
                 for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All processes terminated. Rediscovering top interface...")
+                print("[+] Interface processes terminated. Rediscovering top interface...")
                 
                 # Rediscover the top interface
                 all_interfaces = new_mapping
@@ -2685,24 +2739,26 @@ def lightscope_run():
             elapsed_time = current_time - core_start_time
             if elapsed_time >= restart_interval:
                 print(f"[+] 24-hour restart interval reached (running for {elapsed_time/3600:.1f} hours)")
-                print("[+] Terminating interface processes for scheduled restart...")
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                print("[+] Terminating all processes for scheduled restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process", 
+                             "honeypot_process", "honeypot_uploader_process"):
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting for scheduled restart.")
+                print("[+] All processes terminated. Exiting for scheduled restart.")
                 return  # Exit cleanly - runner will restart us
 
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating interface processes for restart...")
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                print("[+] Update detected! Terminating all processes for restart...")
+                for pname in ("lightscope_process", "read_from_interface_process", "upload_process", 
+                             "honeypot_process", "honeypot_uploader_process"):
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting core for update restart.")
+                print("[+] All processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
 
             # Check for interface changes
@@ -2729,12 +2785,13 @@ def lightscope_run():
             
             if needs_rediscovery:
                 print("[+] Terminating current interface processes...")
+                # Only terminate interface processes, NOT honeypot processes during interface changes
                 for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = active_context[pname]
-                    if p.is_alive():
+                    p = active_context.get(pname)
+                    if p and p.is_alive():
                         p.terminate()
                         p.join(timeout=1)
-                print("[+] All processes terminated. Rediscovering top interface...")
+                print("[+] Interface processes terminated. Rediscovering top interface...")
                 
                 # Rediscover the top interface
                 all_interfaces = new_mapping
