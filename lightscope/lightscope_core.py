@@ -3538,15 +3538,22 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     print(f"_honeypot_worker: Sending PROXY header: {hdr.strip()}", flush=True)
                                     remote_conn.sendall(hdr.encode())
 
-                                    # bi-directional forwarding
-                                    def forward(src, dst, direction="unknown"):
+                                    # bi-directional forwarding with timeout to prevent thread leaks
+                                    def forward(src, dst, direction="unknown", timeout=300):
+                                        """Forward data between sockets with 5-minute timeout"""
                                         try:
+                                            # Set socket timeouts to prevent indefinite blocking
+                                            src.settimeout(timeout)
+                                            dst.settimeout(timeout)
+                                            
                                             while True:
                                                 buf = src.recv(4096)
                                                 if not buf:
                                                     print(f"_honeypot_worker: {direction} connection closed normally", flush=True)
                                                     break
                                                 dst.sendall(buf)
+                                        except socket.timeout:
+                                            print(f"_honeypot_worker: {direction} timed out after {timeout}s (preventing thread leak)", flush=True)
                                         except Exception as e:
                                             print(f"_honeypot_worker: {direction} forwarding error: {e}", flush=True)
                                         finally:
