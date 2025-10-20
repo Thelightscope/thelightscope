@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.2.0"
+ls_version = "1.3.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -2333,36 +2333,61 @@ def cleanup_orphaned_processes():
     """Kill any orphaned LightScope processes from previous runs"""
     try:
         current_pid = os.getpid()
-        print(f"Cleaning up orphaned processes (current PID: {current_pid})...")
+        parent_pid = os.getppid()  # Get parent PID (the runner)
+        print(f"Cleaning up orphaned processes (current PID: {current_pid}, parent PID: {parent_pid})...")
+        
+        # Get current username
+        current_username = psutil.Process(current_pid).username()
+        
+        # PIDs to preserve: ourselves and our parent (the runner that spawned us)
+        preserve_pids = {current_pid, parent_pid}
+        
+        print(f"Will preserve PIDs: {preserve_pids}")
         
         killed_count = 0
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'username']):
             try:
-                # Skip ourselves
-                if proc.info['pid'] == current_pid:
+                pid = proc.info['pid']
+                
+                # Skip processes we want to preserve
+                if pid in preserve_pids:
                     continue
                 
-                # Check if it's a Python process running LightScope
+                # Only look at processes owned by the same user (lightscope)
+                if proc.info['username'] != current_username:
+                    continue
+                
+                # Check if it's a Python process
+                name = proc.info['name']
+                if not name or 'python' not in name.lower():
+                    continue
+                
+                # Check command line - must have lightscope-runner.py in it
                 cmdline = proc.info['cmdline']
-                if cmdline and isinstance(cmdline, list):
-                    cmdline_str = ' '.join(cmdline)
-                    # Look for lightscope_core.py or lightscope-runner.py in the command line
-                    if 'lightscope_core' in cmdline_str.lower() or 'lightscope-runner' in cmdline_str.lower():
-                        # But don't kill the runner process
-                        if 'lightscope-runner' in cmdline_str.lower():
-                            continue
-                        
-                        print(f"Found orphaned LightScope process: PID {proc.info['pid']}, killing...")
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except psutil.TimeoutExpired:
-                            print(f"Process {proc.info['pid']} didn't terminate, killing forcefully...")
-                            proc.kill()
-                        killed_count += 1
+                if not cmdline or not isinstance(cmdline, list):
+                    continue
+                    
+                cmdline_str = ' '.join(cmdline)
+                
+                # If it's a Python process owned by lightscope user with lightscope-runner in cmdline,
+                # and it's NOT in our preserve list, it's an orphan - kill it!
+                if 'lightscope-runner' in cmdline_str.lower():
+                    print(f"Found orphaned LightScope process: PID {pid}, cmdline: {cmdline_str[:100]}")
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                        print(f"  Successfully terminated PID {pid}")
+                    except psutil.TimeoutExpired:
+                        print(f"  Process {pid} didn't terminate, killing forcefully...")
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    killed_count += 1
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 # Process died or we can't access it
+                continue
+            except Exception as e:
+                print(f"Error processing PID {pid}: {e}")
                 continue
         
         if killed_count > 0:
@@ -2372,6 +2397,8 @@ def cleanup_orphaned_processes():
             
     except Exception as e:
         print(f"Error during orphaned process cleanup: {e}")
+        import traceback
+        traceback.print_exc()
         # Don't fail startup if cleanup fails
 
 
