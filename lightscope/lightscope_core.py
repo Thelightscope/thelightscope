@@ -2333,33 +2333,82 @@ def cleanup_orphaned_processes():
     """Kill any orphaned LightScope processes from previous runs"""
     try:
         current_pid = os.getpid()
-        print(f"Cleaning up orphaned processes (current PID: {current_pid})...")
+        parent_pid = os.getppid()  # Get parent PID (the runner)
+        print(f"Cleaning up orphaned processes (current PID: {current_pid}, parent PID: {parent_pid})...")
+        
+        # Get the current process tree to preserve
+        current_proc = psutil.Process(current_pid)
+        parent_proc = psutil.Process(parent_pid)
+        
+        # PIDs to preserve: ourselves, our parent (runner), and any current children
+        preserve_pids = {current_pid, parent_pid}
+        
+        # Add any children of the current process (shouldn't be any yet at startup, but be safe)
+        try:
+            for child in current_proc.children(recursive=True):
+                preserve_pids.add(child.pid)
+        except:
+            pass
         
         killed_count = 0
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'ppid', 'username']):
             try:
-                # Skip ourselves
-                if proc.info['pid'] == current_pid:
+                pid = proc.info['pid']
+                
+                # Skip processes we want to preserve
+                if pid in preserve_pids:
                     continue
                 
-                # Check if it's a Python process running LightScope
+                # Only look at processes owned by the same user
+                try:
+                    if proc.info['username'] != psutil.Process(current_pid).username():
+                        continue
+                except:
+                    continue
+                
+                # Check if it's a Python process that might be LightScope-related
+                name = proc.info['name']
+                if not name or 'python' not in name.lower():
+                    continue
+                
                 cmdline = proc.info['cmdline']
-                if cmdline and isinstance(cmdline, list):
-                    cmdline_str = ' '.join(cmdline)
-                    # Look for lightscope_core.py or lightscope-runner.py in the command line
-                    if 'lightscope_core' in cmdline_str.lower() or 'lightscope-runner' in cmdline_str.lower():
-                        # But don't kill the runner process
-                        if 'lightscope-runner' in cmdline_str.lower():
-                            continue
-                        
-                        print(f"Found orphaned LightScope process: PID {proc.info['pid']}, killing...")
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except psutil.TimeoutExpired:
-                            print(f"Process {proc.info['pid']} didn't terminate, killing forcefully...")
-                            proc.kill()
-                        killed_count += 1
+                if not cmdline or not isinstance(cmdline, list):
+                    continue
+                    
+                cmdline_str = ' '.join(cmdline).lower()
+                
+                # Kill if it's:
+                # 1. A lightscope_core.py process (not the runner)
+                # 2. OR a Python multiprocessing child whose parent is no longer alive
+                should_kill = False
+                
+                if 'lightscope_core' in cmdline_str and 'lightscope-runner' not in cmdline_str:
+                    should_kill = True
+                    reason = "lightscope_core process"
+                elif 'multiprocessing' in cmdline_str or proc.info['ppid'] not in preserve_pids:
+                    # Check if this looks like an orphaned multiprocessing worker
+                    # Try to see if its parent still exists
+                    try:
+                        parent = psutil.Process(proc.info['ppid'])
+                        parent_cmdline = ' '.join(parent.cmdline()).lower()
+                        # If parent is lightscope_core but not in our preserve list, it's orphaned
+                        if 'lightscope_core' in parent_cmdline or 'python' in parent.name().lower():
+                            should_kill = True
+                            reason = "orphaned multiprocessing worker"
+                    except psutil.NoSuchProcess:
+                        # Parent doesn't exist - definitely orphaned
+                        should_kill = True
+                        reason = "orphaned process (parent dead)"
+                
+                if should_kill:
+                    print(f"Found orphaned LightScope process ({reason}): PID {pid}, killing...")
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except psutil.TimeoutExpired:
+                        print(f"Process {pid} didn't terminate, killing forcefully...")
+                        proc.kill()
+                    killed_count += 1
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 # Process died or we can't access it
@@ -2372,6 +2421,8 @@ def cleanup_orphaned_processes():
             
     except Exception as e:
         print(f"Error during orphaned process cleanup: {e}")
+        import traceback
+        traceback.print_exc()
         # Don't fail startup if cleanup fails
 
 
