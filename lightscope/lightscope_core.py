@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.3.3"
+ls_version = "1.3.4"
 
 print(f"ls_version: {ls_version}")
 
@@ -2248,7 +2248,9 @@ def choose_busiest_interface_mac_linux(sample_duration=5, timeout=10):
     Uses threading to avoid hanging if one interface blocks.
     Returns (interface_name, ip_dict) for the busiest interface, or (None, None) if none found.
     """
+    print("choose_busiest_interface_mac_linux: Starting interface discovery...")
     interfaces_and_ips = choose_mac_linux_interface()
+    print(f"choose_busiest_interface_mac_linux: Found {len(interfaces_and_ips) if interfaces_and_ips else 0} interfaces")
     
     if not interfaces_and_ips:
         print("No interfaces found")
@@ -2263,23 +2265,28 @@ def choose_busiest_interface_mac_linux(sample_duration=5, timeout=10):
     
     def sample_interface_thread(iface):
         """Thread worker to sample a single interface"""
+        print(f"Thread for {iface}: Starting sampling...")
         try:
             count = sample_interface_traffic(iface, duration=sample_duration)
             with traffic_counts_lock:
                 traffic_counts[iface] = count
+            print(f"Thread for {iface}: Completed with {count} packets")
         except Exception as e:
             print(f"Error sampling interface {iface} in thread: {e}")
             with traffic_counts_lock:
                 traffic_counts[iface] = 0
     
     # Start all sampling threads
+    print("Starting all sampling threads...")
     threads = []
     for iface in interfaces_and_ips.keys():
         t = threading.Thread(target=sample_interface_thread, args=(iface,), daemon=True)
         t.start()
         threads.append((iface, t))
+        print(f"Started thread for interface {iface}")
     
     # Wait for threads with timeout
+    print(f"Waiting for threads (timeout={timeout}s)...")
     start_time = time.time()
     for iface, t in threads:
         remaining = timeout - (time.time() - start_time)
@@ -2289,6 +2296,8 @@ def choose_busiest_interface_mac_linux(sample_duration=5, timeout=10):
                 print(f"Warning: Interface {iface} sampling timed out")
         else:
             print(f"Warning: No time left to wait for interface {iface}")
+    
+    print(f"Thread wait completed. Collected data from {len(traffic_counts)} interfaces")
     
     if not traffic_counts:
         print("No traffic data collected from any interface")
@@ -2513,11 +2522,14 @@ def lightscope_run():
         # end honeypot
 
         # --- initial discovery & spawn for BUSIEST interface only ---
-        busiest_iface, busiest_ips = choose_busiest_interface_mac_linux(sample_duration=5)
+        print("Starting interface discovery and traffic sampling...")
+        busiest_iface, busiest_ips = choose_busiest_interface_mac_linux(sample_duration=3, timeout=5)
         
         if not busiest_iface:
             print("ERROR: No interfaces with traffic found. Exiting.")
             return
+        
+        print(f"Interface selection completed: {busiest_iface}")
         
         print(f"Spawning processes for busiest interface: {busiest_iface} with IPs: {busiest_ips}")
         current_interface = busiest_iface
