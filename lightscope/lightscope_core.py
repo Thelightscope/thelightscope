@@ -2213,6 +2213,7 @@ def sample_interface_traffic(interface, duration=5):
     """
     Sample traffic on an interface for a short duration and count TCP packets.
     Returns the count of TCP packets observed.
+    Uses timeout to ensure the thread exits even if no packets arrive.
     """
     import pylibpcap.base
     try:
@@ -2222,14 +2223,16 @@ def sample_interface_traffic(interface, duration=5):
             promisc=1,
             filter="ip and tcp",
             buffer_size=1 << 20,
-            snaplen=256
+            snaplen=256,
+            timeout=5000  # 5000ms (5s) timeout so we can check duration even with no packets
         )
         
         packet_count = 0
         start_time = time.time()
         
         for plen, ts, buf in sniffobj.capture():
-            packet_count += 1
+            if plen > 0:  # Only count actual packets (not timeouts)
+                packet_count += 1
             if time.time() - start_time >= duration:
                 break
         
@@ -2239,9 +2242,10 @@ def sample_interface_traffic(interface, duration=5):
         print(f"Error sampling interface {interface}: {e}")
         return 0
 
-def choose_busiest_interface_mac_linux(sample_duration=5):
+def choose_busiest_interface_mac_linux(sample_duration=5, timeout=10):
     """
-    Sample all interfaces and return the one with the most TCP traffic.
+    Sample all interfaces in parallel and return the one with the most TCP traffic.
+    Uses threading to avoid hanging if one interface blocks.
     Returns (interface_name, ip_dict) for the busiest interface, or (None, None) if none found.
     """
     interfaces_and_ips = choose_mac_linux_interface()
@@ -2250,22 +2254,54 @@ def choose_busiest_interface_mac_linux(sample_duration=5):
         print("No interfaces found")
         return None, None
     
-    print(f"Sampling {len(interfaces_and_ips)} interface(s) for {sample_duration} seconds each...")
+    print(f"Sampling {len(interfaces_and_ips)} interface(s) in parallel for up to {sample_duration} seconds each (max wait {timeout}s)...")
     
+    # Shared dictionary for thread results (thread-safe)
+    import threading
     traffic_counts = {}
+    traffic_counts_lock = threading.Lock()
+    
+    def sample_interface_thread(iface):
+        """Thread worker to sample a single interface"""
+        try:
+            count = sample_interface_traffic(iface, duration=sample_duration)
+            with traffic_counts_lock:
+                traffic_counts[iface] = count
+        except Exception as e:
+            print(f"Error sampling interface {iface} in thread: {e}")
+            with traffic_counts_lock:
+                traffic_counts[iface] = 0
+    
+    # Start all sampling threads
+    threads = []
     for iface in interfaces_and_ips.keys():
-        count = sample_interface_traffic(iface, duration=sample_duration)
-        traffic_counts[iface] = count
+        t = threading.Thread(target=sample_interface_thread, args=(iface,), daemon=True)
+        t.start()
+        threads.append((iface, t))
+    
+    # Wait for threads with timeout
+    start_time = time.time()
+    for iface, t in threads:
+        remaining = timeout - (time.time() - start_time)
+        if remaining > 0:
+            t.join(timeout=remaining)
+            if t.is_alive():
+                print(f"Warning: Interface {iface} sampling timed out")
+        else:
+            print(f"Warning: No time left to wait for interface {iface}")
     
     if not traffic_counts:
-        print("No traffic detected on any interface")
-        return None, None
+        print("No traffic data collected from any interface")
+        # Fallback: return first interface
+        first_iface = list(interfaces_and_ips.keys())[0]
+        print(f"FALLBACK: Using first available interface: {first_iface}")
+        return first_iface, interfaces_and_ips[first_iface]
     
     # Find interface with most traffic
     busiest_iface = max(traffic_counts, key=traffic_counts.get)
     busiest_count = traffic_counts[busiest_iface]
     
-    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets")
+    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets ({len(traffic_counts)}/{len(interfaces_and_ips)} interfaces reported)")
     
     return busiest_iface, interfaces_and_ips[busiest_iface]
 
@@ -2281,7 +2317,7 @@ def sample_interface_traffic_windows(interface, duration=5):
             snaplen=256,
             promisc=True,
             immediate=True,
-            timeout_ms=50
+            timeout_ms=5000
         )
         sniffer.setfilter("ip and tcp")
         
@@ -2299,9 +2335,10 @@ def sample_interface_traffic_windows(interface, duration=5):
         print(f"Error sampling Windows interface {interface}: {e}")
         return 0
 
-def choose_busiest_interface_windows(sample_duration=5):
+def choose_busiest_interface_windows(sample_duration=5, timeout=10):
     """
-    Sample all Windows interfaces and return the one with the most TCP traffic.
+    Sample all Windows interfaces in parallel and return the one with the most TCP traffic.
+    Uses threading to avoid hanging if one interface blocks.
     Returns (interface_name, ip_dict) for the busiest interface, or (None, None) if none found.
     """
     interfaces_and_ips = choose_windows_interface()
@@ -2310,22 +2347,54 @@ def choose_busiest_interface_windows(sample_duration=5):
         print("No interfaces found")
         return None, None
     
-    print(f"Sampling {len(interfaces_and_ips)} interface(s) for {sample_duration} seconds each...")
+    print(f"Sampling {len(interfaces_and_ips)} interface(s) in parallel for up to {sample_duration} seconds each (max wait {timeout}s)...")
     
+    # Shared dictionary for thread results (thread-safe)
+    import threading
     traffic_counts = {}
+    traffic_counts_lock = threading.Lock()
+    
+    def sample_interface_thread(iface):
+        """Thread worker to sample a single interface"""
+        try:
+            count = sample_interface_traffic_windows(iface, duration=sample_duration)
+            with traffic_counts_lock:
+                traffic_counts[iface] = count
+        except Exception as e:
+            print(f"Error sampling interface {iface} in thread: {e}")
+            with traffic_counts_lock:
+                traffic_counts[iface] = 0
+    
+    # Start all sampling threads
+    threads = []
     for iface in interfaces_and_ips.keys():
-        count = sample_interface_traffic_windows(iface, duration=sample_duration)
-        traffic_counts[iface] = count
+        t = threading.Thread(target=sample_interface_thread, args=(iface,), daemon=True)
+        t.start()
+        threads.append((iface, t))
+    
+    # Wait for threads with timeout
+    start_time = time.time()
+    for iface, t in threads:
+        remaining = timeout - (time.time() - start_time)
+        if remaining > 0:
+            t.join(timeout=remaining)
+            if t.is_alive():
+                print(f"Warning: Interface {iface} sampling timed out")
+        else:
+            print(f"Warning: No time left to wait for interface {iface}")
     
     if not traffic_counts:
-        print("No traffic detected on any interface")
-        return None, None
+        print("No traffic data collected from any interface")
+        # Fallback: return first interface
+        first_iface = list(interfaces_and_ips.keys())[0]
+        print(f"FALLBACK: Using first available interface: {first_iface}")
+        return first_iface, interfaces_and_ips[first_iface]
     
     # Find interface with most traffic
     busiest_iface = max(traffic_counts, key=traffic_counts.get)
     busiest_count = traffic_counts[busiest_iface]
     
-    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets")
+    print(f"Busiest interface: {busiest_iface} with {busiest_count} TCP packets ({len(traffic_counts)}/{len(interfaces_and_ips)} interfaces reported)")
     
     return busiest_iface, interfaces_and_ips[busiest_iface]
 
