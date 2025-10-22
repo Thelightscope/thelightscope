@@ -2406,11 +2406,7 @@ def lightscope_run():
     # Clean up any orphaned processes from previous runs first
     cleanup_orphaned_processes()
     
-    # Sleep for 1 minute at startup to prevent rapid restart loops
-    # This protects against bugs that cause immediate crashes
-    print("LightScope starting - waiting 60 seconds before initialization...")
-    time.sleep(60)
-    print("Initialization proceeding...")
+    print("LightScope initialization proceeding...")
     
     if  platforminfo.system() != "Windows":
         try:
