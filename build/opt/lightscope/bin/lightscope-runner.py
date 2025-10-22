@@ -47,7 +47,7 @@ else:
     LOGS_DIR = LIGHTSCOPE_HOME / "logs"
     BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
-runner_version = "1.0.1"
+runner_version = "1.0.2"
 
 print(f"runner_version: {runner_version}")
 
@@ -280,7 +280,7 @@ def update_checker_thread(updater):
     """Background thread that periodically checks for updates"""
     logger.info("Update checker thread started")
     last_update_check = time.time()
-    update_interval = 60 * 60  # Every hour
+    update_interval = 60 * 10  # Every hour
     
     while not shutdown_event.is_set():
         try:
