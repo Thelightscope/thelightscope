@@ -6,6 +6,7 @@ License:        Proprietary
 URL:            https://thelightscope.com
 Source0:        lightscope_core.py
 Source1:        lightscope_runner.py
+Source2:        lightscope-public.pem
 BuildArch:      noarch
 # Override OS detection to make it more compatible
 %define _build_os linux
@@ -64,6 +65,7 @@ rm -rf %{buildroot}
 
 # Create directory structure
 mkdir -p %{buildroot}/opt/lightscope/bin
+mkdir -p %{buildroot}/opt/lightscope/config
 mkdir -p %{buildroot}/usr/lib/systemd/system
 mkdir -p %{buildroot}/usr/share/lightscope
 mkdir -p %{buildroot}/usr/bin
@@ -73,6 +75,9 @@ install -m 644 %{SOURCE0} %{buildroot}/opt/lightscope/bin/lightscope_core.py
 
 # Install runner script
 install -m 755 %{SOURCE1} %{buildroot}/opt/lightscope/bin/lightscope-runner.py
+
+# Install public key for signature verification
+install -m 644 %{SOURCE2} %{buildroot}/opt/lightscope/config/lightscope-public.pem
 
 # Create systemd service file
 cat > %{buildroot}/usr/lib/systemd/system/lightscope.service << 'SERVICE_EOF'
@@ -173,7 +178,8 @@ chmod +x %{buildroot}/usr/bin/lightscope
 
 %files
 %defattr(-,root,root,-)
-/opt/lightscope/
+/opt/lightscope/bin/
+/opt/lightscope/config/
 /usr/lib/systemd/system/lightscope.service
 /usr/share/lightscope/config.ini.example
 /usr/bin/lightscope

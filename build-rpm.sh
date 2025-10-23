@@ -42,6 +42,19 @@ else
     exit 1
 fi
 
+# Copy the public key to SOURCES (try both naming conventions)
+echo "Copying public key to RPM SOURCES directory..."
+if [ -f "lightscope-public.pem" ]; then
+    cp lightscope-public.pem "$RPM_BUILD_DIR/SOURCES/lightscope-public.pem"
+    echo "✅ Successfully copied lightscope-public.pem to SOURCES"
+elif [ -f "lightscope_public.pem" ]; then
+    cp lightscope_public.pem "$RPM_BUILD_DIR/SOURCES/lightscope-public.pem"
+    echo "✅ Successfully copied lightscope_public.pem to SOURCES (renamed to lightscope-public.pem)"
+else
+    echo "Warning: Public key not found (lightscope-public.pem or lightscope_public.pem)"
+    echo "The package will build but signature verification will not work without the public key"
+fi
+
 # Verify the copy worked
 BUILT_VERSION=$(grep -o 'ls_version = "[^"]*"' "$RPM_BUILD_DIR/SOURCES/lightscope_core.py" | sed 's/ls_version = "\(.*\)"/\1/')
 echo "Verified SOURCES version: $BUILT_VERSION"

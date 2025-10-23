@@ -32,32 +32,7 @@ if ! command -v rpmbuild &> /dev/null; then
     exit 1
 fi
 
-echo "1. Building RPM package..."
-./build-rpm.sh
-
-echo ""
-echo "2. Package built successfully!"
-echo "RPM packages:"
-ls -la *.rpm 2>/dev/null || echo "No .rpm packages found"
-
-# Get the actual RPM filename for use in deployment
-RPM_FILE=$(ls lightscope-*-*.noarch.rpm 2>/dev/null | head -1)
-if [ -z "$RPM_FILE" ]; then
-    echo "Error: No RPM package found matching pattern lightscope-*-*.noarch.rpm"
-    exit 1
-fi
-echo "Using RPM file: $RPM_FILE"
-
-echo ""
-echo "3. RPM Package information:"
-rpm -qip *.rpm 2>/dev/null || echo "RPM tools not available on this system"
-
-echo ""
-echo "4. RPM Package contents:"
-rpm -qlp *.rpm 2>/dev/null || echo "RPM tools not available on this system"
-
-echo ""
-echo "=== Code Signing Test ==="
+echo "=== Code Signing Keys Setup ==="
 
 # Check if cryptography is installed
 if ! python3 -c "import cryptography" 2>/dev/null; then
@@ -98,7 +73,7 @@ if ! python3 -c "import cryptography" 2>/dev/null; then
     echo "✓ Cryptography installed successfully"
 fi
 
-echo "5. Checking for signing keys..."
+echo "1. Checking for signing keys..."
 if [ ! -f "lightscope-private.pem" ] || [ ! -f "lightscope-public.pem" ]; then
     echo "Generating new RSA key pair..."
     python3 sign-and-upload.py --generate-keys
@@ -107,6 +82,31 @@ else
     echo "  - lightscope-private.pem"
     echo "  - lightscope-public.pem"
 fi
+
+echo ""
+echo "2. Building RPM package..."
+./build-rpm.sh
+
+echo ""
+echo "3. Package built successfully!"
+echo "RPM packages:"
+ls -la *.rpm 2>/dev/null || echo "No .rpm packages found"
+
+# Get the actual RPM filename for use in deployment
+RPM_FILE=$(ls lightscope-*-*.noarch.rpm 2>/dev/null | head -1)
+if [ -z "$RPM_FILE" ]; then
+    echo "Error: No RPM package found matching pattern lightscope-*-*.noarch.rpm"
+    exit 1
+fi
+echo "Using RPM file: $RPM_FILE"
+
+echo ""
+echo "4. RPM Package information:"
+rpm -qip *.rpm 2>/dev/null || echo "RPM tools not available on this system"
+
+echo ""
+echo "5. RPM Package contents:"
+rpm -qlp *.rpm 2>/dev/null || echo "RPM tools not available on this system"
 
 echo ""
 echo "6. Signing the code..."

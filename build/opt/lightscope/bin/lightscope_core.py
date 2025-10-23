@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.4.2"
+ls_version = "1.4.3"
 
 print(f"ls_version: {ls_version}")
 
@@ -2154,6 +2154,10 @@ def lightscope_run():
         # --- initial discovery & spawn ---
         # Get custom interface from config if specified
         custom_interface = config_settings.get('interface', '').strip()
+        if custom_interface:
+            print(f"[+] Custom interface specified in config: '{custom_interface}'")
+        else:
+            print("[+] No custom interface specified in config - using auto-detection for all interfaces")
         interfaces_and_ips = choose_mac_linux_interface(custom_interface if custom_interface else None)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
@@ -2266,6 +2270,10 @@ def lightscope_run():
         # --- initial discovery & spawn ---
         # Get custom interface from config if specified
         custom_interface = config_settings.get('interface', '').strip()
+        if custom_interface:
+            print(f"[+] Custom interface specified in config: '{custom_interface}'")
+        else:
+            print("[+] No custom interface specified in config - using auto-detection for all interfaces")
         interfaces_and_ips = choose_windows_interface(custom_interface if custom_interface else None)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():

@@ -30,7 +30,7 @@ echo "Copying lightscope/lightscope_core.py (v$VERSION) to build directory..."
 cp lightscope/lightscope_core.py "$BUILD_DIR/opt/lightscope/bin/"
 
 # Copy the actual lightscope-runner.py to the package (overwrite template version)
-echo "Copying lightscope/lightscope_core.py to build directory..."
+echo "Copying lightscope/lightscope-runner.py to build directory..."
 cp lightscope/lightscope-runner.py "$BUILD_DIR/opt/lightscope/bin/"
 
 # Get runner version for logging
@@ -39,6 +39,20 @@ if [ -n "$RUNNER_VERSION" ]; then
     echo "Runner version: $RUNNER_VERSION"
 else
     echo "Warning: Could not extract runner version"
+fi
+
+# Copy the public key to the package (try both naming conventions)
+echo "Copying public key to build directory..."
+mkdir -p "$BUILD_DIR/opt/lightscope/config"
+if [ -f "lightscope-public.pem" ]; then
+    cp lightscope-public.pem "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem"
+    echo "✅ Successfully copied lightscope-public.pem"
+elif [ -f "lightscope_public.pem" ]; then
+    cp lightscope_public.pem "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem"
+    echo "✅ Successfully copied lightscope_public.pem (renamed to lightscope-public.pem)"
+else
+    echo "Warning: Public key not found (lightscope-public.pem or lightscope_public.pem)"
+    echo "The package will build but signature verification will not work without the public key"
 fi
 
 # Verify the copy worked
@@ -75,6 +89,10 @@ chmod 755 "$BUILD_DIR/opt/lightscope/bin/lightscope-runner.py"
 chmod 644 "$BUILD_DIR/opt/lightscope/bin/lightscope_core.py"
 chmod 644 "$BUILD_DIR/lib/systemd/system/lightscope.service"
 chmod 644 "$BUILD_DIR/usr/share/lightscope/config.ini.example"
+# Set permissions for public key if it exists
+if [ -f "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem" ]; then
+    chmod 644 "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem"
+fi
 
 # Build the package
 OUTPUT_FILE="${PACKAGE_NAME}_${VERSION}_amd64.deb"

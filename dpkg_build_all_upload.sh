@@ -25,23 +25,7 @@ if [ ! -f "lightscope/lightscope_core.py" ]; then
     exit 1
 fi
 
-echo "1. Building dpkg package..."
-./build-dpkg.sh
-
-echo ""
-echo "2. Package built successfully!"
-ls -la *.deb
-
-echo ""
-echo "3. Package information:"
-dpkg --info *.deb
-
-echo ""
-echo "4. Package contents:"
-dpkg --contents *.deb
-
-echo ""
-echo "=== Code Signing Test ==="
+echo "=== Code Signing Keys Setup ==="
 
 # Check if cryptography is installed
 if ! python3 -c "import cryptography" 2>/dev/null; then
@@ -49,7 +33,7 @@ if ! python3 -c "import cryptography" 2>/dev/null; then
     pip3 install cryptography
 fi
 
-echo "5. Checking for signing keys..."
+echo "1. Checking for signing keys..."
 if [ ! -f "lightscope-private.pem" ] || [ ! -f "lightscope-public.pem" ]; then
     echo "Generating new RSA key pair..."
     python3 sign-and-upload.py --generate-keys
@@ -58,6 +42,22 @@ else
     echo "  - lightscope-private.pem"
     echo "  - lightscope-public.pem"
 fi
+
+echo ""
+echo "2. Building dpkg package..."
+./build-dpkg.sh
+
+echo ""
+echo "3. Package built successfully!"
+ls -la *.deb
+
+echo ""
+echo "4. Package information:"
+dpkg --info *.deb
+
+echo ""
+echo "5. Package contents:"
+dpkg --contents *.deb
 
 echo ""
 echo "6. Signing the code..."
