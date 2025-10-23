@@ -2134,55 +2134,7 @@ def lightscope_run():
                 print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
             
-            new_mapping = choose_mac_linux_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
             
-            # Try to update external network information, but don't crash if it fails
-            try:
-                external_network_information = fetch_light_scope_info()
-            except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
-                    if p.is_alive():
-                        p.terminate()
-                        p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
-
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_mac_linux(same, new_ips, top_unwanted_ports_producer, shared_open_honeypots)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_mac_linux(born, ips, top_unwanted_ports_producer, shared_open_honeypots)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
 
 
 
@@ -2291,56 +2243,6 @@ def lightscope_run():
                             p.join(timeout=1)
                 print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
-
-            # Try to update external network information, but don't crash if it fails
-            try:
-                external_network_information = fetch_light_scope_info()
-            except Exception as e:
-                print(f"Warning: Failed to update external network information: {e}. Continuing with previous values.")
-                # Continue with existing external_network_information
-                
-            new_mapping = choose_windows_interface()
-            old_ifaces = set(interfaces_and_ips)
-            new_ifaces = set(new_mapping)
-
-            # 1) clean up removed interfaces
-            for gone in old_ifaces - new_ifaces:
-                print(f"[+] Interface {gone!r} went away, terminating its processes")
-                ctx = processes_per_interface.pop(gone)
-                for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                    p = ctx[pname]
-                    if p.is_alive():
-                        p.terminate()
-                        p.join(timeout=1)
-                interfaces_and_ips.pop(gone)
-
-            # 2) detect interfaces whose IP list changed
-            for same in old_ifaces & new_ifaces:
-                old_ips = interfaces_and_ips[same]
-                new_ips = new_mapping[same]
-                if old_ips != new_ips:
-                    print(f"[+] Interface {same!r} IPs changed {old_ips} -> {new_ips}; restarting")
-                    # terminate old procs
-                    ctx = processes_per_interface.pop(same)
-                    for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
-                        p = ctx[pname]
-                        if p.is_alive():
-                            p.terminate()
-                            p.join(timeout=1)
-                    interfaces_and_ips.pop(same)
-                    # spawn fresh
-                    processes_per_interface[same] = spawn_for_interface_windows(same, new_ips)
-                    interfaces_and_ips[same] = new_ips
-
-            # 3) spawn any brand new interfaces
-            for born in new_ifaces - old_ifaces:
-                ips = new_mapping[born]
-                print(f"[+] New interface {born!r} with IPs {ips}: spawning")
-                processes_per_interface[born] = spawn_for_interface_windows(born, ips)
-                interfaces_and_ips[born] = ips
-
-            # (optionally) print status
-            #print("-> active interfaces:", list(processes_per_interface.keys()))
     
 
 
