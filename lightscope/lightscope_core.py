@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.4.1"
+ls_version = "1.4.2"
 
 print(f"ls_version: {ls_version}")
 

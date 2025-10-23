@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.4.0"
+ls_version = "1.4.2"
 
 print(f"ls_version: {ls_version}")
 
@@ -1809,7 +1809,13 @@ def is_npcap_installed():
                 return False
             
 
-def choose_windows_interface():
+def choose_windows_interface(specific_interface=None):
+    """
+    Returns a dict mapping Windows network interfaces to their IP addresses.
+    
+    Args:
+        specific_interface: If provided, only returns this interface. Otherwise auto-detects all.
+    """
     import pcap, wmi, re
     from ipaddress import ip_address
 
@@ -1838,11 +1844,29 @@ def choose_windows_interface():
 
     # 3) produce final mapping from NPF name → its IP lists
     result = {}
-    for dev in devs:
+    
+    # If specific interface is requested, only process that one
+    if specific_interface:
+        if specific_interface not in devs:
+            print(f"WARNING: Specified interface '{specific_interface}' not found in system interfaces!")
+            print(f"Available interfaces: {devs}")
+            return {}
+        
+        devs_to_check = [specific_interface]
+        print(f"Using custom interface from config: {specific_interface}")
+    else:
+        devs_to_check = devs
+    
+    for dev in devs_to_check:
         m = re.search(r'\{([0-9A-Fa-f-]+)\}', dev)
         if m:
             guid = m.group(1).lower()
-            result[dev] = guid_ip_map.get(guid, {'ipv4': [], 'ipv6': []})
+            ip_info = guid_ip_map.get(guid, {'ipv4': [], 'ipv6': []})
+            # Only add if it has valid IPs, or if it's a specific requested interface
+            if ip_info['ipv4'] or ip_info['ipv6'] or specific_interface:
+                result[dev] = ip_info
+            if specific_interface and not (ip_info['ipv4'] or ip_info['ipv6']):
+                print(f"WARNING: Specified interface '{dev}' has no valid IPv4 or IPv6 addresses!")
         else:
             result[dev] = {'ipv4': [], 'ipv6': []}
 
@@ -1893,7 +1917,7 @@ def is_virtual_interface(interface_name):
     
     return False
 
-def choose_mac_linux_interface():
+def choose_mac_linux_interface(specific_interface=None):
     '''return {'en0':{
           'ipv4': ['10.78.180.31'],
           'ipv6': ['fe80::1434:1d02:bea8:c2c5']
@@ -1901,6 +1925,10 @@ def choose_mac_linux_interface():
     """
     Returns a dict mapping each up network interface
     to a dict containing its non-loopback IPv4 and IPv6 addresses.
+    
+    Args:
+        specific_interface: If provided, only returns this interface. Otherwise auto-detects all.
+    
     Example return value:
       {
         'en0': {
@@ -1918,12 +1946,26 @@ def choose_mac_linux_interface():
     addrs = psutil.net_if_addrs()
     result = {}
 
-    for iface, s in stats.items():
+    # If specific interface is requested, only process that one
+    if specific_interface:
+        if specific_interface not in stats:
+            print(f"WARNING: Specified interface '{specific_interface}' not found in system interfaces!")
+            print(f"Available interfaces: {list(stats.keys())}")
+            return {}
+        
+        interfaces_to_check = {specific_interface: stats[specific_interface]}
+        print(f"Using custom interface from config: {specific_interface}")
+    else:
+        interfaces_to_check = stats.items()
+
+    for iface, s in interfaces_to_check.items() if isinstance(interfaces_to_check, dict) else interfaces_to_check:
         if not s.isup:
+            if specific_interface:
+                print(f"WARNING: Specified interface '{iface}' is not up!")
             continue
 
-        # Skip virtual/container interfaces
-        if is_virtual_interface(iface):
+        # Skip virtual/container interfaces (only if auto-detecting)
+        if not specific_interface and is_virtual_interface(iface):
             print(f"Skipping virtual interface: {iface}")
             continue
 
@@ -1943,6 +1985,8 @@ def choose_mac_linux_interface():
                 'ipv4': ipv4s,
                 'ipv6': ipv6s
             }
+        elif specific_interface:
+            print(f"WARNING: Specified interface '{iface}' has no valid IPv4 or IPv6 addresses!")
 
     return result
 
@@ -2108,7 +2152,9 @@ def lightscope_run():
             }
 
         # --- initial discovery & spawn ---
-        interfaces_and_ips = choose_mac_linux_interface()
+        # Get custom interface from config if specified
+        custom_interface = config_settings.get('interface', '').strip()
+        interfaces_and_ips = choose_mac_linux_interface(custom_interface if custom_interface else None)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
@@ -2218,7 +2264,9 @@ def lightscope_run():
             }
 
         # --- initial discovery & spawn ---
-        interfaces_and_ips = choose_windows_interface()
+        # Get custom interface from config if specified
+        custom_interface = config_settings.get('interface', '').strip()
+        interfaces_and_ips = choose_windows_interface(custom_interface if custom_interface else None)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
@@ -2271,6 +2319,7 @@ class configuration_reader:
         self.lookup_network_information_list={}
         self.autoupdate=""
         self.randomization_key="uninitialized"
+        self.interface=""
         self.initialize_config("config.ini")
         self.load_config(config_file)
         print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
@@ -2278,7 +2327,7 @@ class configuration_reader:
 
     def get_config(self):
         config={'database':self.database,'self_telnet_and_ssh_honeypot_ports_to_forward':self.self_telnet_and_ssh_honeypot_ports_to_forward,
-        'autoupdate':self.autoupdate,'randomization_key':self.randomization_key}
+        'autoupdate':self.autoupdate,'randomization_key':self.randomization_key,'interface':self.interface}
         return config
 
     
@@ -2292,6 +2341,7 @@ class configuration_reader:
             self.randomization_key=config.get('Settings', 'randomization_key', fallback="Can't read config").lower()
             self.autoupdate=config.get('Settings', 'autoupdate', fallback="Can't read config").lower()
             self.self_telnet_and_ssh_honeypot_ports_to_forward=config.get('Settings', 'self_telnet_and_ssh_honeypot_ports_to_forward', fallback=[])
+            self.interface=config.get('Settings', 'interface', fallback="").strip()
 
 
 
@@ -2365,12 +2415,29 @@ class configuration_reader:
             config['Settings']['autoupdate'] = autoupdate
             print(f"autoupdate not found; : {autoupdate}")
 
+        # Check for the 'interface' option.
+        if 'interface' not in config['Settings']:
+            config['Settings']['interface'] = ""
+            print(f"interface not found; set to empty (auto-detection enabled)")
 
-        # Optionally, you can also add the comment as a separate step manually 
-        # (Comments are not preserved automatically by configparser when writing back.)
+
         # Write the configuration back to the file.
         with open(config_file, 'w') as f:
             config.write(f)
+        
+        # Add comment for interface field manually since ConfigParser doesn't preserve comments
+        try:
+            with open(config_file, 'r') as f:
+                lines = f.readlines()
+            
+            with open(config_file, 'w') as f:
+                for line in lines:
+                    if line.strip().startswith('interface ='):
+                        f.write('# Custom interface to monitor (leave empty for auto-detection)\n')
+                    f.write(line)
+        except Exception as e:
+            print(f"Note: Could not add comment to interface field: {e}")
+        
         print(f"Configuration updated and saved to {config_file}")
         
 
