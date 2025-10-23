@@ -1854,6 +1854,45 @@ import psutil
 import socket
 import time
 
+def is_virtual_interface(interface_name):
+    """
+    Check if interface is a virtual/container/VM interface that should be excluded.
+    Returns True if the interface should be filtered out.
+    """
+    # Convert to lowercase for case-insensitive matching
+    name_lower = interface_name.lower()
+    
+    # Patterns for virtual/container interfaces to exclude
+    virtual_patterns = [
+        'docker',      # Docker bridge
+        'br-',         # Docker/Linux bridges
+        'veth',        # Virtual ethernet pairs (Docker/containers)
+        'lxc',         # LXC containers
+        'lxdbr',       # LXD bridge
+        'virbr',       # libvirt/KVM virtual bridge
+        'vnet',        # libvirt/KVM virtual network
+        'vbox',        # VirtualBox
+        'vmnet',       # VMware
+        'vethernet',   # Hyper-V (Windows)
+        'cni',         # Container Network Interface (Kubernetes/Podman)
+        'podman',      # Podman
+        'flannel',     # Kubernetes Flannel
+        'weave',       # Kubernetes Weave
+        'calico',      # Kubernetes Calico
+        'tap',         # TAP devices (OpenStack/QEMU)
+        'qbr',         # OpenStack quantum bridge
+        'qvb',         # OpenStack quantum veth bridge-side
+        'qvo',         # OpenStack quantum veth ovs-side
+        'tun',         # TUN devices (VPN/virtualization)
+    ]
+    
+    # Check if interface name starts with any virtual pattern
+    for pattern in virtual_patterns:
+        if name_lower.startswith(pattern):
+            return True
+    
+    return False
+
 def choose_mac_linux_interface():
     '''return {'en0':{
           'ipv4': ['10.78.180.31'],
@@ -1881,6 +1920,11 @@ def choose_mac_linux_interface():
 
     for iface, s in stats.items():
         if not s.isup:
+            continue
+
+        # Skip virtual/container interfaces
+        if is_virtual_interface(iface):
+            print(f"Skipping virtual interface: {iface}")
             continue
 
         ipv4s = [
@@ -3009,7 +3053,6 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         sys.stdout.flush()
         sys.stderr.flush()
         # Don't exit here, let the process manager handle it
-
 
 def cleanup_orphaned_processes():
     """Kill any orphaned LightScope processes from previous runs"""
