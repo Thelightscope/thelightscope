@@ -2419,9 +2419,9 @@ class configuration_reader:
 
         # Check for the 'autoupdate' option.
         if 'autoupdate' not in config['Settings'] or not config['Settings']['autoupdate'].strip():
-            autoupdate="no"
+            autoupdate="yes"
             config['Settings']['autoupdate'] = autoupdate
-            print(f"autoupdate not found; : {autoupdate}")
+            print(f"autoupdate not found; set to: {autoupdate}")
 
         # Check for the 'interface' option.
         if 'interface' not in config['Settings']:
