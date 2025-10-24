@@ -12,7 +12,6 @@ ExecStart=/opt/lightscope/venv/bin/python3 /opt/lightscope/bin/lightscope-runner
 ExecReload=/bin/kill -HUP $MAINPID
 WorkingDirectory=/opt/lightscope
 Environment=PYTHONPATH=/opt/lightscope/bin
-Environment=LIGHTSCOPE_CONFIG=/opt/lightscope/config/config.ini
 
 # Network capabilities for packet capture and port binding
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE

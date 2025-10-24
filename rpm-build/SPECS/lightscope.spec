@@ -95,7 +95,6 @@ ExecStart=/opt/lightscope/venv/bin/python /opt/lightscope/bin/lightscope-runner.
 ExecReload=/bin/kill -HUP $MAINPID
 WorkingDirectory=/opt/lightscope
 Environment=PYTHONPATH=/opt/lightscope
-Environment=LIGHTSCOPE_CONFIG=/opt/lightscope/config/config.ini
 
 # Network capabilities for packet capture and port binding
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
@@ -283,12 +282,18 @@ RAND_PART=$(cat /dev/urandom | tr -dc 'a-z' | head -c 47)
 DB_NAME="${TODAY}_${RAND_PART}"
 print_status "✅ Generated database name: $DB_NAME"
 
+# Clean up old config file location if it exists
+if [ -f "/opt/lightscope/config/config.ini" ]; then
+    print_status "🧹 Removing old config file from /opt/lightscope/config/config.ini"
+    rm -f /opt/lightscope/config/config.ini
+fi
+
 # Create configuration file with pre-populated database name
-if [ ! -f "/opt/lightscope/config/config.ini" ]; then
+if [ ! -f "/opt/lightscope/config.ini" ]; then
     print_status "🔧 Creating configuration file with database name: $DB_NAME"
     
     # Create config file with proper database name directly
-    cat > /opt/lightscope/config/config.ini << EOF
+    cat > /opt/lightscope/config.ini << EOF
 [Settings]
 # Database name for storing LightScope data (auto-generated during installation)
 database = $DB_NAME
@@ -318,8 +323,8 @@ max_honeypot_ports = 10
 honeypot_rotation_interval = 4 
 EOF
     
-    chown lightscope:lightscope /opt/lightscope/config/config.ini || true
-    chmod 644 /opt/lightscope/config/config.ini || true
+    chown lightscope:lightscope /opt/lightscope/config.ini || true
+    chmod 644 /opt/lightscope/config.ini || true
     print_status "✅ Configuration file created with database name: $DB_NAME"
 else
     print_status "⚙️  Configuration file already exists, updating database name..."
@@ -329,7 +334,7 @@ else
 import configparser
 import os
 
-config_file = "/opt/lightscope/config/config.ini"
+config_file = "/opt/lightscope/config.ini"
 db_name = "$DB_NAME"
 
 try:
@@ -352,8 +357,8 @@ except Exception as e:
     # Fallback to sed approach
     os.system(f"sed -i 's/^database = .*/database = {db_name}/' {config_file}")
 EOF
-    chown lightscope:lightscope /opt/lightscope/config/config.ini || true
-    chmod 644 /opt/lightscope/config/config.ini || true
+    chown lightscope:lightscope /opt/lightscope/config.ini || true
+    chmod 644 /opt/lightscope/config.ini || true
 fi
 
 # Update systemd service with database name environment variable
@@ -457,7 +462,7 @@ echo "   systemctl status lightscope    # Check service status"
 echo "   journalctl -fu lightscope      # View live logs" 
 echo "   journalctl -u lightscope       # View all logs" 
 echo "" 
-echo "📁 Configuration: /opt/lightscope/config/config.ini" 
+echo "📁 Configuration: /opt/lightscope/config.ini" 
 echo "============================================" 
 
 # Add completion timestamp

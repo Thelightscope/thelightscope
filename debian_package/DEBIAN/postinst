@@ -83,12 +83,18 @@ else
     echo "✅ Generated standard database name: $DB_NAME"
 fi
 
+# Clean up old config file location if it exists
+if [ -f "$LIGHTSCOPE_HOME/config/config.ini" ]; then
+    echo "Removing old config file from $LIGHTSCOPE_HOME/config/config.ini"
+    rm -f "$LIGHTSCOPE_HOME/config/config.ini"
+fi
+
 # Copy configuration files and pre-populate with generated database name
-if [ ! -f "$LIGHTSCOPE_HOME/config/config.ini" ]; then
+if [ ! -f "$LIGHTSCOPE_HOME/config.ini" ]; then
     echo "Creating configuration file with database name: $DB_NAME"
     
     # Create config file with proper database name directly
-    cat > "$LIGHTSCOPE_HOME/config/config.ini" << EOF
+    cat > "$LIGHTSCOPE_HOME/config.ini" << EOF
 [Settings]
 # Database name for storing LightScope data (auto-generated during installation)
 database = $DB_NAME
@@ -118,7 +124,7 @@ max_honeypot_ports = 10
 honeypot_rotation_interval = 4 
 EOF
     
-    chown "$LIGHTSCOPE_USER:$LIGHTSCOPE_USER" "$LIGHTSCOPE_HOME/config/config.ini"
+    chown "$LIGHTSCOPE_USER:$LIGHTSCOPE_USER" "$LIGHTSCOPE_HOME/config.ini"
     echo "✅ Configuration file created with database name: $DB_NAME"
 else
     echo "Configuration file already exists, checking database name..."
@@ -128,7 +134,7 @@ else
 import configparser
 import os
 
-config_file = "$LIGHTSCOPE_HOME/config/config.ini"
+config_file = "$LIGHTSCOPE_HOME/config.ini"
 db_name = "$DB_NAME"
 
 try:
@@ -168,7 +174,7 @@ EOF
 
 # Set proper permissions
 chmod 755 "$LIGHTSCOPE_HOME/bin/lightscope-runner.py"
-chmod 644 "$LIGHTSCOPE_HOME/config/config.ini"
+chmod 644 "$LIGHTSCOPE_HOME/config.ini"
 chmod 755 "$LIGHTSCOPE_HOME/updates"
 chmod 644 /etc/systemd/system/lightscope.service.d/database-name.conf
 
@@ -196,7 +202,7 @@ echo "   (Look for LIGHTSCOPE_DB_NAME in the environment)"
 echo ""
 echo "=============================================="
 echo ""
-echo "Configuration file: $LIGHTSCOPE_HOME/config/config.ini"
+echo "Configuration file: $LIGHTSCOPE_HOME/config.ini"
 echo "Log files: $LIGHTSCOPE_HOME/logs/"
 echo ""
 echo "✅ LightScope service is now running!"
