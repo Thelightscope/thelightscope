@@ -16,6 +16,7 @@ import urllib.request
 import urllib.error
 import threading
 import signal
+import configparser
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -47,7 +48,7 @@ else:
     LOGS_DIR = LIGHTSCOPE_HOME / "logs"
     BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
-runner_version = "1.0.2"
+runner_version = "1.1.1"
 
 print(f"runner_version: {runner_version}")
 
@@ -276,6 +277,20 @@ def ensure_directories():
     for directory in [CONFIG_DIR, UPDATES_DIR, LOGS_DIR, BIN_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
 
+def is_autoupdate_disabled():
+    """Check if autoupdate is explicitly disabled in config.ini. Returns True if disabled, False otherwise."""
+    config_path = Path("/opt/lightscope/config.ini")
+    try:
+        if config_path.exists():
+            config = configparser.ConfigParser()
+            config.read(config_path)
+            if 'Settings' in config:
+                autoupdate = config.get('Settings', 'autoupdate', fallback='').lower().strip()
+                return autoupdate in ['no', 'false']
+    except Exception as e:
+        logger.debug(f"Could not read autoupdate config: {e}")
+    return False  # Default to updates enabled
+
 def update_checker_thread(updater):
     """Background thread that periodically checks for updates"""
     logger.info("Update checker thread started")
@@ -288,17 +303,21 @@ def update_checker_thread(updater):
             
             # Check for updates periodically
             if current_time - last_update_check > update_interval:
-                logger.info("Performing periodic update check...")
-                if updater.check_for_updates():
-                    logger.info("Update available! Downloading...")
-                    if updater.download_update():
-                        logger.info("Update downloaded successfully, signaling restart...")
-                        update_available_event.set()
-                        break
-                    else:
-                        logger.error("Update download failed")
-                
-                last_update_check = current_time
+                if is_autoupdate_disabled():
+                    logger.info("Auto-updates disabled in config, skipping update check")
+                    last_update_check = current_time
+                else:
+                    logger.info("Performing periodic update check...")
+                    if updater.check_for_updates():
+                        logger.info("Update available! Downloading...")
+                        if updater.download_update():
+                            logger.info("Update downloaded successfully, signaling restart...")
+                            update_available_event.set()
+                            break
+                        else:
+                            logger.error("Update download failed")
+                    
+                    last_update_check = current_time
             
             # Sleep for 60 seconds before next check (or until shutdown)
             shutdown_event.wait(60)
@@ -430,12 +449,15 @@ def main():
     
     try:
         # Check for updates on startup
-        if updater.check_for_updates():
-            logger.info("Update available on startup, downloading...")
-            if updater.download_update():
-                logger.info("Startup update installed successfully")
-            else:
-                logger.error("Startup update failed, continuing with current version")
+        if is_autoupdate_disabled():
+            logger.info("Auto-updates disabled in config, skipping startup update check")
+        else:
+            if updater.check_for_updates():
+                logger.info("Update available on startup, downloading...")
+                if updater.download_update():
+                    logger.info("Startup update installed successfully")
+                else:
+                    logger.error("Startup update failed, continuing with current version")
         
         # Start background threads
         update_thread = threading.Thread(target=update_checker_thread, args=(updater,), name="Update-Checker")
