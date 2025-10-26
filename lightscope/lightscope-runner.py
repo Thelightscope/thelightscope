@@ -48,7 +48,7 @@ else:
     LOGS_DIR = LIGHTSCOPE_HOME / "logs"
     BIN_DIR = LIGHTSCOPE_HOME / "bin"
 
-runner_version = "1.1.1"
+runner_version = "1.2.0"
 
 print(f"runner_version: {runner_version}")
 
@@ -295,7 +295,7 @@ def update_checker_thread(updater):
     """Background thread that periodically checks for updates"""
     logger.info("Update checker thread started")
     last_update_check = time.time()
-    update_interval = 60 * 10  # Every hour
+    update_interval = 60 * 5  # Every 5 minutes
     
     while not shutdown_event.is_set():
         try:
@@ -321,10 +321,13 @@ def update_checker_thread(updater):
             
             # Sleep for 60 seconds before next check (or until shutdown)
             shutdown_event.wait(60)
-            
+
         except Exception as e:
             logger.error(f"Error in update checker thread: {e}")
-            # Sleep before retrying
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Sleep before retrying to prevent rapid failures from consuming CPU
+            logger.info("Update checker sleeping 5 minutes after error before retry...")
             shutdown_event.wait(300)  # 5 minutes
     
     logger.info("Update checker thread exiting")
@@ -332,7 +335,7 @@ def update_checker_thread(updater):
 def watchdog_thread():
     """Background thread that sends systemd watchdog notifications"""
     logger.info("Watchdog thread started")
-    
+
     while not shutdown_event.is_set():
         try:
             notify_systemd_watchdog()
@@ -340,8 +343,11 @@ def watchdog_thread():
             shutdown_event.wait(15)
         except Exception as e:
             logger.error(f"Error in watchdog thread: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Sleep to prevent rapid failures from consuming CPU
             shutdown_event.wait(15)
-    
+
     logger.info("Watchdog thread exiting")
 
 def signal_handler(signum, frame):
@@ -386,39 +392,52 @@ def load_lightscope_core():
             try:
                 lightscope_core.lightscope_run()
             except Exception as e:
-                logger.error(f"LightScope core error: {e}")
+                logger.error(f"LightScope core crashed with exception: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                shutdown_event.set()
+                # DO NOT set shutdown_event - let the runner detect the crash and retry
+                # Sleep to prevent rapid CPU consumption if crashes happen immediately
+                logger.info("Sleeping 30 seconds before runner can retry...")
+                time.sleep(30)
         
         # Start LightScope in a separate thread so we can monitor for updates
         core_thread = threading.Thread(target=run_core, name="LightScope-Core")
         core_thread.daemon = True
         core_thread.start()
         lightscope_process = core_thread
-        
+
+        # Track why we're stopping - to distinguish shutdown vs crash vs update
+        shutdown_requested = False
+        update_requested = False
+
         # Wait for either shutdown or update signal
         while core_thread.is_alive():
             if shutdown_event.is_set():
                 logger.info("Shutdown requested, stopping LightScope core...")
+                shutdown_requested = True
                 break
             elif update_available_event.is_set():
                 logger.info("Update available, stopping LightScope core for restart...")
                 shutdown_event.set()
+                update_requested = True
                 break
-            
+
             # Check every second
             time.sleep(1)
-        
+
         # Wait for core thread to finish (with timeout)
         core_thread.join(timeout=30)
-        
-        if update_available_event.is_set():
+
+        if update_requested or update_available_event.is_set():
             logger.info("LightScope core stopped for update, will restart with new version")
             return "restart"  # Special return value for restart
+        elif shutdown_requested:
+            logger.info("LightScope core stopped due to shutdown request")
+            return True  # Normal shutdown
         else:
-            logger.info("LightScope core exited normally")
-            return True
+            # Thread died unexpectedly - this is a failure that needs retry
+            logger.error("LightScope core thread died unexpectedly - treating as failure")
+            return False  # Trigger retry with backoff
         
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down...")
@@ -433,88 +452,114 @@ def load_lightscope_core():
 def main():
     """Main runner function with proper threading architecture"""
     logger.info("LightScope Runner starting...")
-    
+
     # Setup signal handlers
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-    
-    # Ensure directories exist
-    ensure_directories()
-    
-    # Initialize updater
-    updater = SecureUpdater()
-    
-    # Notify systemd that we're ready to start
-    notify_systemd_ready()
-    
-    try:
-        # Check for updates on startup
-        if is_autoupdate_disabled():
-            logger.info("Auto-updates disabled in config, skipping startup update check")
-        else:
-            if updater.check_for_updates():
-                logger.info("Update available on startup, downloading...")
-                if updater.download_update():
-                    logger.info("Startup update installed successfully")
-                else:
-                    logger.error("Startup update failed, continuing with current version")
-        
-        # Start background threads
-        update_thread = threading.Thread(target=update_checker_thread, args=(updater,), name="Update-Checker")
-        update_thread.daemon = True
-        update_thread.start()
-        
-        watchdog_bg_thread = threading.Thread(target=watchdog_thread, name="Watchdog")
-        watchdog_bg_thread.daemon = True
-        watchdog_bg_thread.start()
-        
-        consecutive_failures = 0
-        
-        # Main execution loop
-        while not shutdown_event.is_set():
-            result = load_lightscope_core()
-            
-            if result == "restart":
-                # Update was installed, restart with new version
-                logger.info("Restarting with updated version...")
-                consecutive_failures = 0
-                # Clear the update event and continue
-                update_available_event.clear()
-                shutdown_event.clear()
-                continue
-            elif result:
-                # Normal shutdown
-                break
+
+    # Outer loop to handle fatal errors - runner should NEVER exit on its own
+    fatal_error_count = 0
+    while not shutdown_event.is_set():
+        try:
+            # Ensure directories exist
+            ensure_directories()
+
+            # Initialize updater
+            updater = SecureUpdater()
+
+            # Notify systemd that we're ready to start
+            notify_systemd_ready()
+
+            # Reset fatal error count on successful start
+            fatal_error_count = 0
+
+            # Check for updates on startup
+            if is_autoupdate_disabled():
+                logger.info("Auto-updates disabled in config, skipping startup update check")
             else:
-                # Failure - retry forever with exponential backoff
-                consecutive_failures += 1
-                logger.error(f"LightScope core failed (attempt {consecutive_failures})")
-                logger.info("Will retry indefinitely until successful or shutdown requested")
-                
-                # Wait before retry with exponential backoff (max 5 minutes)
-                sleep_time = min(10 * (2 ** (consecutive_failures - 1)), 300)
-                logger.info(f"Retrying in {sleep_time} seconds...")
-                
-                for _ in range(sleep_time):
-                    if shutdown_event.is_set():
-                        break
-                    time.sleep(1)
-        
-        logger.info("Main loop exiting, shutting down threads...")
-        shutdown_event.set()
-        
-        # Wait for threads to finish
-        update_thread.join(timeout=5)
-        watchdog_bg_thread.join(timeout=5)
-        
-    except KeyboardInterrupt:
-        logger.info("Received interrupt, shutting down...")
-        shutdown_event.set()
-    except Exception as e:
-        logger.error(f"Fatal error in runner: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        sys.exit(1)
+                if updater.check_for_updates():
+                    logger.info("Update available on startup, downloading...")
+                    if updater.download_update():
+                        logger.info("Startup update installed successfully")
+                    else:
+                        logger.error("Startup update failed, continuing with current version")
+
+            # Start background threads
+            update_thread = threading.Thread(target=update_checker_thread, args=(updater,), name="Update-Checker")
+            update_thread.daemon = True
+            update_thread.start()
+
+            watchdog_bg_thread = threading.Thread(target=watchdog_thread, name="Watchdog")
+            watchdog_bg_thread.daemon = True
+            watchdog_bg_thread.start()
+
+            consecutive_failures = 0
+
+            # Main execution loop
+            while not shutdown_event.is_set():
+                result = load_lightscope_core()
+
+                if result == "restart":
+                    # Update was installed, restart with new version
+                    logger.info("Restarting with updated version...")
+                    consecutive_failures = 0
+                    # Clear the update event and continue
+                    update_available_event.clear()
+                    shutdown_event.clear()
+                    continue
+                elif result:
+                    # Normal shutdown
+                    break
+                else:
+                    # Failure - retry forever with exponential backoff
+                    consecutive_failures += 1
+                    logger.error(f"LightScope core failed (attempt {consecutive_failures})")
+                    logger.info("Will retry indefinitely until successful or shutdown requested")
+
+                    # Wait before retry with exponential backoff (min 30s, max 5 minutes)
+                    sleep_time = min(max(30, 10 * (2 ** (consecutive_failures - 1))), 300)
+                    logger.info(f"Waiting {sleep_time} seconds before retry to prevent CPU overload...")
+
+                    for _ in range(sleep_time):
+                        if shutdown_event.is_set():
+                            break
+                        time.sleep(1)
+
+            logger.info("Main loop exiting, shutting down threads...")
+            shutdown_event.set()
+
+            # Wait for threads to finish
+            update_thread.join(timeout=5)
+            watchdog_bg_thread.join(timeout=5)
+
+            # If we get here normally, break out of the outer fatal error retry loop
+            break
+
+        except KeyboardInterrupt:
+            logger.info("Received interrupt, shutting down...")
+            shutdown_event.set()
+            break
+        except Exception as e:
+            # Fatal error in runner setup or main loop - retry with backoff
+            fatal_error_count += 1
+            logger.error(f"Fatal error in runner (attempt {fatal_error_count}): {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+            if shutdown_event.is_set():
+                logger.info("Shutdown requested, exiting despite fatal error")
+                break
+
+            # Wait before retrying with exponential backoff (min 30s, max 5 minutes)
+            sleep_time = min(max(30, 10 * (2 ** (fatal_error_count - 1))), 300)
+            logger.info(f"Fatal error recovery: waiting {sleep_time} seconds before retry...")
+
+            for _ in range(sleep_time):
+                if shutdown_event.is_set():
+                    break
+                time.sleep(1)
+
+    logger.info("LightScope Runner exiting")
 
 if __name__ == "__main__":
     main() 
