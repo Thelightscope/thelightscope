@@ -504,7 +504,19 @@ def main():
                     logger.info("Restarting with updated version...")
                     consecutive_failures = 0
                     # Clear the update event and continue
+                    '''update_available_event.clear()
+                    shutdown_event.clear()
+                    continue'''
                     update_available_event.clear()
+                    shutdown_event.set()
+                    try:
+                        update_thread.join(timeout=5)
+                    except Exception:
+                        pass
+                    try:
+                        watchdog_bg_thread.join(timeout=5)
+                    except Exception:
+                        pass
                     shutdown_event.clear()
                     continue
                 elif result:
