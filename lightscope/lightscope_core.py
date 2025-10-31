@@ -1374,7 +1374,7 @@ def send_honeypot_data(consumer_upload_conn):
     stop_event    = threading.Event()
 
     # --------------------------- reader thread ---------------------------
-    def reader():
+    '''def reader():
         nonlocal last_activity
         while not stop_event.is_set():
             try:
@@ -1453,7 +1453,7 @@ def send_data(consumer_upload_conn):
 
     queue = deque(maxlen=MAX_SIZE)
     last_activity = time.monotonic()
-    stop_event    = threading.Event()
+    stop_event    = threading.Event()'''
 
     # --------------------------- reader thread ---------------------------
     def reader():
@@ -1562,7 +1562,7 @@ def read_from_interface_mac_linux(network_interface,
     last_activity = time.monotonic()
 
     # --------------------------- sender thread ---------------------------
-    def sender_thread():
+    '''def sender_thread():
         nonlocal last_activity
         
         #todo remove debug
@@ -1703,7 +1703,7 @@ def read_from_interface_windows(network_interface,
     IDLE_FLUSH_SECS = 1.0
     SLEEP_DELAY     = 0.001  # 1ms when no flush condition met
     send_deque      = deque(maxlen=MAX_SIZE)
-    last_activity   = time.monotonic()
+    last_activity   = time.monotonic()'''
 
     # --------------------------- sender thread ---------------------------
     def sender_thread():
@@ -1744,7 +1744,8 @@ def read_from_interface_windows(network_interface,
     try:
         sniffer = pcap.pcap(
             name=network_interface,
-            snaplen=256,
+            # snaplen=256,
+            snaplen=1024,
             promisc=bool(promisc_mode),
             immediate=True,
             timeout_ms=50
@@ -1761,7 +1762,8 @@ def read_from_interface_windows(network_interface,
 
     # --- install the BPF filter ---
     try:
-        sniffer.setfilter("ip and tcp")
+        #sniffer.setfilter("ip and tcp")
+        sniffer.setfilter("ip or arp")
     except Exception as e:
         ###print(f"ERROR setting filter: {e}", file=sys.stderr)
         sys.exit(1)
@@ -2976,14 +2978,27 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     remote_conn.sendall(hdr.encode())
 
                                     # bi-directional forwarding
-                                    def forward(src, dst, direction="unknown"):
+                                    '''def forward(src, dst, direction="unknown"):
                                         try:
                                             while True:
                                                 buf = src.recv(4096)
                                                 if not buf:
                                                     print(f"_honeypot_worker: {direction} connection closed normally", flush=True)
                                                     break
-                                                dst.sendall(buf)
+                                                dst.sendall(buf)'''
+                                    def forward(src, dst, direction="unknown")
+                                        try:
+                                            src.settimeout(5.0)
+                                            dst.settimeout(5.0)
+                                            while True:
+                                                try:
+                                                    buf = src.recv(4096)
+                                                    if not buf:
+                                                        print(f"_honeypot_worker: {direction} connection closed normally", flush=True)
+                                                        break
+                                                    dst.sendall(buf)
+                                                except socket.timeout:
+                                                    break
                                         except Exception as e:
                                             print(f"_honeypot_worker: {direction} forwarding error: {e}", flush=True)
                                         finally:
