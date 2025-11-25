@@ -2476,6 +2476,11 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         program_start_time = time.time()
         history_clear_time = program_start_time + 7 * 24 * 60 * 60  # Clear history after 7 days
         previously_opened_ports = set()  # Track ports we've opened before
+
+        # Connection limiting to prevent thread exhaustion
+        MAX_CONCURRENT_CONNECTIONS = 50  # Limit concurrent forwarding connections
+        connection_semaphore = threading.Semaphore(MAX_CONCURRENT_CONNECTIONS)
+        active_connections = [0]  # Use list to allow mutation in nested function
         
         def hash_segment(segment, key):
             """Hash a single byte segment with the given key."""
@@ -2975,7 +2980,9 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     print(f"_honeypot_worker: Sending PROXY header: {hdr.strip()}", flush=True)
                                     remote_conn.sendall(hdr.encode())
 
-                                    # bi-directional forwarding
+                                    # bi-directional forwarding with connection tracking
+                                    connection_closed = [False]  # Shared flag between the two forwarding threads
+
                                     def forward(src, dst, direction="unknown"):
                                         try:
                                             while True:
@@ -2990,8 +2997,29 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                             for s in (src, dst):
                                                 try: s.close()
                                                 except: pass
+                                            # Release semaphore only once per connection pair
+                                            if not connection_closed[0]:
+                                                connection_closed[0] = True
+                                                connection_semaphore.release()
+                                                active_connections[0] -= 1
+                                                print(f"_honeypot_worker: Connection slot released. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
 
-                                    import threading
+                                    # Check if we can accept more connections
+                                    if not connection_semaphore.acquire(blocking=False):
+                                        print(f"_honeypot_worker: Connection limit reached ({MAX_CONCURRENT_CONNECTIONS}), rejecting {addr[0]}:{addr[1]}", flush=True)
+                                        local_conn.close()
+                                        remote_conn.close()
+                                        continue
+
+                                    active_connections[0] += 1
+                                    print(f"_honeypot_worker: Connection accepted. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
+
+                                    # Set socket timeouts to prevent idle connections from blocking forever
+                                    # 3 minute timeout - if no data received, connection is closed
+                                    CONNECTION_IDLE_TIMEOUT = 180  # seconds
+                                    local_conn.settimeout(CONNECTION_IDLE_TIMEOUT)
+                                    remote_conn.settimeout(CONNECTION_IDLE_TIMEOUT)
+
                                     threading.Thread(target=forward, args=(local_conn, remote_conn, f"client->server({svc})"), daemon=True).start()
                                     threading.Thread(target=forward, args=(remote_conn, local_conn, f"server({svc})->client"), daemon=True).start()
 
