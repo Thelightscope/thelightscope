@@ -750,6 +750,11 @@ class Ports:
 
     # ---------- hotpath: add packet ------------------------------------
     def add_pkt_to_watch(self, pkt):
+        # Prevent unbounded growth during SYN floods
+        MAX_WATCHED_FLOWS = 50000
+        if len(self.packets_to_watch) >= MAX_WATCHED_FLOWS:
+            return  # At capacity, skip tracking this packet
+
         key = (pkt.ip_src, pkt.tcp_sport, pkt.ip_dst, pkt.tcp_dport)
         bucket = self.packets_to_watch.get(key)
         if bucket is None:              # new flow
@@ -937,8 +942,8 @@ class Ports:
             # skip non-numeric keys (like "time_started" in your prev lists) if any
             if not isinstance(port, int):
                 continue
-                count = len(remotes)
-                current_open_common_ports.append(f"{port}x{count}")
+            count = len(remotes)
+            current_open_common_ports.append(f"{port}x{count}")
 
         previosuly_open_common_ports = []
         # gather all ports seen in either A or B
@@ -1317,9 +1322,12 @@ class Ports:
             except Exception as e:
                 ###print(f"send_port_counts: Error sending data: {e}")
                 pass
-        else:
-            ###print(f"send_port_counts: No data to send from {self.interface_human_readable}. port_counts: {len(self.port_counts) if self.port_counts else 0}")
-            pass
+
+        # Trim port_counts to prevent unbounded memory growth
+        # Keep top 1000 entries - more than enough for honeypot decisions
+        MAX_PORT_COUNT_ENTRIES = 1000
+        if len(self.port_counts) > MAX_PORT_COUNT_ENTRIES:
+            self.port_counts = Counter(dict(self.port_counts.most_common(MAX_PORT_COUNT_ENTRIES)))
 
     #Note that nmap scans will hit all the ports we have open, so we don't need to do anything special for those
     #We just need to catch the ones that sporadically check random ports, and the ones that only hit one or a cople ports like 23
@@ -1385,9 +1393,9 @@ def send_honeypot_data(consumer_upload_conn):
             queue.append(item)
             last_activity = time.monotonic()
         # drain any leftover
-        while True:
+        while consumer_upload_conn.poll(0):
             try:
-                queue.append(consumer_upload_conn.recv_nowait())
+                queue.append(consumer_upload_conn.recv())
             except Exception:
                 break
 
@@ -1467,9 +1475,9 @@ def send_data(consumer_upload_conn):
             queue.append(item)
             last_activity = time.monotonic()
         # drain any leftover
-        while True:
+        while consumer_upload_conn.poll(0):
             try:
-                queue.append(consumer_upload_conn.recv_nowait())
+                queue.append(consumer_upload_conn.recv())
             except Exception:
                 break
 

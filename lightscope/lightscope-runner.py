@@ -21,6 +21,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
+from packaging import version as pkg_version
 
 
 # Import systemd watchdog support
@@ -152,12 +153,27 @@ class SecureUpdater:
             
             logger.info(f"Latest version: {latest_version}")
             logger.info(f"Current version: {self.current_version}")
-            
-            if self.current_version != latest_version:
-                logger.info(f"Update available: {self.current_version} -> {latest_version}")
-                return True
-            else:
-                logger.info("Already running latest version")
+
+            # Only update if server version is newer (prevent downgrades)
+            try:
+                current_ver = pkg_version.parse(self.current_version)
+                latest_ver = pkg_version.parse(latest_version)
+
+                if latest_ver > current_ver:
+                    logger.info(f"Update available: {self.current_version} -> {latest_version}")
+                    return True
+                elif latest_ver < current_ver:
+                    logger.warning(f"Server version {latest_version} is older than current {self.current_version} - skipping downgrade")
+                    return False
+                else:
+                    logger.info("Already running latest version")
+                    return False
+            except Exception as e:
+                logger.error(f"Error comparing versions: {e}")
+                # Fall back to simple string comparison if version parsing fails
+                if self.current_version != latest_version:
+                    logger.warning(f"Version parsing failed, using string comparison")
+                    return True
                 return False
                 
         except urllib.error.URLError as e:
