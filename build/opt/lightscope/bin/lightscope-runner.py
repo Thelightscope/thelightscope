@@ -21,6 +21,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.exceptions import InvalidSignature
+from packaging import version as pkg_version
 
 
 # Import systemd watchdog support
@@ -152,12 +153,27 @@ class SecureUpdater:
             
             logger.info(f"Latest version: {latest_version}")
             logger.info(f"Current version: {self.current_version}")
-            
-            if self.current_version != latest_version:
-                logger.info(f"Update available: {self.current_version} -> {latest_version}")
-                return True
-            else:
-                logger.info("Already running latest version")
+
+            # Only update if server version is newer (prevent downgrades)
+            try:
+                current_ver = pkg_version.parse(self.current_version)
+                latest_ver = pkg_version.parse(latest_version)
+
+                if latest_ver > current_ver:
+                    logger.info(f"Update available: {self.current_version} -> {latest_version}")
+                    return True
+                elif latest_ver < current_ver:
+                    logger.warning(f"Server version {latest_version} is older than current {self.current_version} - skipping downgrade")
+                    return False
+                else:
+                    logger.info("Already running latest version")
+                    return False
+            except Exception as e:
+                logger.error(f"Error comparing versions: {e}")
+                # Fall back to simple string comparison if version parsing fails
+                if self.current_version != latest_version:
+                    logger.warning(f"Version parsing failed, using string comparison")
+                    return True
                 return False
                 
         except urllib.error.URLError as e:
@@ -232,17 +248,29 @@ class SecureUpdater:
                     logger.error("Signature verification failed - update aborted")
                     return False
                 
-                # Backup current version
-                current_core = BIN_DIR / "lightscope_core.py"
-                if current_core.exists():
-                    backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
-                    current_core.rename(backup_path)
-                    logger.info(f"Backed up current version to {backup_path}")
-                
-                # Install new version
+                # Install new version using atomic swap for safety
                 import shutil
-                shutil.copy2(core_temp_path, current_core)
-                os.chmod(current_core, 0o644)
+                current_core = BIN_DIR / "lightscope_core.py"
+                temp_target = current_core.with_suffix('.py.new')
+
+                # Step 1: Copy new file to same directory with temp name
+                shutil.copy2(core_temp_path, temp_target)
+                os.chmod(temp_target, 0o644)
+
+                try:
+                    # Step 2: Backup old file (copy, not move - original stays in place)
+                    if current_core.exists():
+                        backup_path = UPDATES_DIR / f"lightscope_core_backup_{int(time.time())}.py"
+                        shutil.copy2(current_core, backup_path)
+                        logger.info(f"Backed up current version to {backup_path}")
+
+                    # Step 3: Atomic rename (same filesystem guarantees atomicity)
+                    temp_target.rename(current_core)
+                except Exception as e:
+                    # Clean up temp file if something went wrong
+                    if temp_target.exists():
+                        temp_target.unlink()
+                    raise
                 
                 logger.info("Update installed successfully")
                 
@@ -373,7 +401,7 @@ def load_lightscope_core():
         # Import the core module (fresh import to get any updates)
         import importlib
         if 'lightscope_core' in sys.modules:
-            importlib.reload(sys.modules['lightscope_core'])
+            lightscope_core = importlib.reload(sys.modules['lightscope_core'])
         else:
             import lightscope_core
         
@@ -506,6 +534,21 @@ def main():
                     # Clear the update event and continue
                     update_available_event.clear()
                     shutdown_event.clear()
+
+                    # Restart threads if they died during the update process
+                    # (update_checker exits after finding update, watchdog exits when shutdown_event was set)
+                    if not update_thread.is_alive():
+                        logger.info("Restarting update checker thread...")
+                        update_thread = threading.Thread(target=update_checker_thread, args=(updater,), name="Update-Checker")
+                        update_thread.daemon = True
+                        update_thread.start()
+
+                    if not watchdog_bg_thread.is_alive():
+                        logger.info("Restarting watchdog thread...")
+                        watchdog_bg_thread = threading.Thread(target=watchdog_thread, name="Watchdog")
+                        watchdog_bg_thread.daemon = True
+                        watchdog_bg_thread.start()
+
                     continue
                 elif result:
                     # Normal shutdown

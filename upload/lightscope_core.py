@@ -750,6 +750,11 @@ class Ports:
 
     # ---------- hotpath: add packet ------------------------------------
     def add_pkt_to_watch(self, pkt):
+        # Prevent unbounded growth during SYN floods
+        MAX_WATCHED_FLOWS = 50000
+        if len(self.packets_to_watch) >= MAX_WATCHED_FLOWS:
+            return  # At capacity, skip tracking this packet
+
         key = (pkt.ip_src, pkt.tcp_sport, pkt.ip_dst, pkt.tcp_dport)
         bucket = self.packets_to_watch.get(key)
         if bucket is None:              # new flow
@@ -937,8 +942,8 @@ class Ports:
             # skip non-numeric keys (like "time_started" in your prev lists) if any
             if not isinstance(port, int):
                 continue
-                count = len(remotes)
-                current_open_common_ports.append(f"{port}x{count}")
+            count = len(remotes)
+            current_open_common_ports.append(f"{port}x{count}")
 
         previosuly_open_common_ports = []
         # gather all ports seen in either A or B
@@ -1317,9 +1322,12 @@ class Ports:
             except Exception as e:
                 ###print(f"send_port_counts: Error sending data: {e}")
                 pass
-        else:
-            ###print(f"send_port_counts: No data to send from {self.interface_human_readable}. port_counts: {len(self.port_counts) if self.port_counts else 0}")
-            pass
+
+        # Trim port_counts to prevent unbounded memory growth
+        # Keep top 1000 entries - more than enough for honeypot decisions
+        MAX_PORT_COUNT_ENTRIES = 1000
+        if len(self.port_counts) > MAX_PORT_COUNT_ENTRIES:
+            self.port_counts = Counter(dict(self.port_counts.most_common(MAX_PORT_COUNT_ENTRIES)))
 
     #Note that nmap scans will hit all the ports we have open, so we don't need to do anything special for those
     #We just need to catch the ones that sporadically check random ports, and the ones that only hit one or a cople ports like 23
@@ -1385,9 +1393,9 @@ def send_honeypot_data(consumer_upload_conn):
             queue.append(item)
             last_activity = time.monotonic()
         # drain any leftover
-        while True:
+        while consumer_upload_conn.poll(0):
             try:
-                queue.append(consumer_upload_conn.recv_nowait())
+                queue.append(consumer_upload_conn.recv())
             except Exception:
                 break
 
@@ -1467,9 +1475,9 @@ def send_data(consumer_upload_conn):
             queue.append(item)
             last_activity = time.monotonic()
         # drain any leftover
-        while True:
+        while consumer_upload_conn.poll(0):
             try:
-                queue.append(consumer_upload_conn.recv_nowait())
+                queue.append(consumer_upload_conn.recv())
             except Exception:
                 break
 
@@ -2476,6 +2484,11 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         program_start_time = time.time()
         history_clear_time = program_start_time + 7 * 24 * 60 * 60  # Clear history after 7 days
         previously_opened_ports = set()  # Track ports we've opened before
+
+        # Connection limiting to prevent thread exhaustion
+        MAX_CONCURRENT_CONNECTIONS = 50  # Limit concurrent forwarding connections
+        connection_semaphore = threading.Semaphore(MAX_CONCURRENT_CONNECTIONS)
+        active_connections = [0]  # Use list to allow mutation in nested function
         
         def hash_segment(segment, key):
             """Hash a single byte segment with the given key."""
@@ -2975,7 +2988,9 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     print(f"_honeypot_worker: Sending PROXY header: {hdr.strip()}", flush=True)
                                     remote_conn.sendall(hdr.encode())
 
-                                    # bi-directional forwarding
+                                    # bi-directional forwarding with connection tracking
+                                    connection_closed = [False]  # Shared flag between the two forwarding threads
+
                                     def forward(src, dst, direction="unknown"):
                                         try:
                                             while True:
@@ -2990,8 +3005,29 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                             for s in (src, dst):
                                                 try: s.close()
                                                 except: pass
+                                            # Release semaphore only once per connection pair
+                                            if not connection_closed[0]:
+                                                connection_closed[0] = True
+                                                connection_semaphore.release()
+                                                active_connections[0] -= 1
+                                                print(f"_honeypot_worker: Connection slot released. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
 
-                                    import threading
+                                    # Check if we can accept more connections
+                                    if not connection_semaphore.acquire(blocking=False):
+                                        print(f"_honeypot_worker: Connection limit reached ({MAX_CONCURRENT_CONNECTIONS}), rejecting {addr[0]}:{addr[1]}", flush=True)
+                                        local_conn.close()
+                                        remote_conn.close()
+                                        continue
+
+                                    active_connections[0] += 1
+                                    print(f"_honeypot_worker: Connection accepted. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
+
+                                    # Set socket timeouts to prevent idle connections from blocking forever
+                                    # 3 minute timeout - if no data received, connection is closed
+                                    CONNECTION_IDLE_TIMEOUT = 180  # seconds
+                                    local_conn.settimeout(CONNECTION_IDLE_TIMEOUT)
+                                    remote_conn.settimeout(CONNECTION_IDLE_TIMEOUT)
+
                                     threading.Thread(target=forward, args=(local_conn, remote_conn, f"client->server({svc})"), daemon=True).start()
                                     threading.Thread(target=forward, args=(remote_conn, local_conn, f"server({svc})->client"), daemon=True).start()
 

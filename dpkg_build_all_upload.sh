@@ -79,7 +79,7 @@ echo ""
 echo "Files created for distribution:"
 echo "  1. upload/ directory - Contains all distribution files"
 echo "  2. lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz - Complete package archive"
-echo "  3. lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb - Debian installer"
+echo "  3. lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb - Debian installer"
 echo ""
 echo "🚀 SERVER UPLOAD LOCATIONS:"
 echo "=============================================="
@@ -90,7 +90,7 @@ echo "   ├── lightscope_core.py           → https://thelightscope.com/la
 echo "   ├── lightscope_core.py.sig       → https://thelightscope.com/latest/lightscope_core.py.sig"
 echo "   ├── public-key                   → https://thelightscope.com/latest/public-key"
 echo "   ├── version                      → https://thelightscope.com/latest/version"
-echo "   └── lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb    → https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb"
+echo "   └── lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb    → https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
 echo ""
 echo "📋 UPLOAD COMMANDS:"
 echo "=============================================="
@@ -101,7 +101,7 @@ echo "scp upload/lightscope_core.py \${SERVER_USER}@\${SERVER_HOST}:/var/www/lig
 echo "scp upload/lightscope_core.py.sig \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
 echo "scp upload/lightscope-public.pem \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/public-key"
 echo "scp upload/version \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/version"
-echo "scp lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
+echo "scp lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
 echo ""
 echo "🧪 TESTING DEPLOYMENT:"
 echo "=============================================="
@@ -111,13 +111,13 @@ echo "curl https://thelightscope.com/latest/version"
 echo "curl https://thelightscope.com/latest/public-key"
 echo "curl https://thelightscope.com/latest/lightscope_core.py"
 echo "curl https://thelightscope.com/latest/lightscope_core.py.sig"
-echo "curl https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb"
+echo "curl https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
 echo ""
 echo "🔧 LOCAL TESTING:"
 echo "=============================================="
 echo ""
 echo "# Test installation:"
-echo "sudo dpkg -i lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_amd64.deb"
+echo "sudo dpkg -i lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
 echo ""
 echo "# Check service status:"
 echo "sudo systemctl status lightscope"
@@ -192,7 +192,7 @@ sudo bash -c '
         echo \"Found upload directory, moving contents...\"
         ls -la upload/
         # Capture the deb file name from upload directory before moving
-        NEW_DEB_FILE=\$(ls upload/lightscope_*_amd64.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
+        NEW_DEB_FILE=\$(ls upload/lightscope_*_all.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
         mv upload/* . 2>/dev/null || echo \"No files in upload directory\"
         rm -rf upload/
     else
@@ -209,7 +209,7 @@ sudo bash -c '
                 if [ -f \"\$dir/lightscope_core.py\" ]; then
                     echo \"Found lightscope_core.py in \$dir, moving contents...\"
                     # Capture the deb file name from subdirectory before moving
-                    NEW_DEB_FILE=\$(ls \"\$dir\"/lightscope_*_amd64.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
+                    NEW_DEB_FILE=\$(ls \"\$dir\"/lightscope_*_all.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
                     mv \"\$dir\"/* . 2>/dev/null || echo \"No files to move from \$dir\"
                     rm -rf \"\$dir\"
                     break
@@ -235,14 +235,14 @@ sudo bash -c '
         ls -la lightscope_latest.deb
     else
         echo \"Newly uploaded deb file not found, looking for any available deb file...\"
-        DEB_FILE=\$(ls -t lightscope_*_amd64.deb 2>/dev/null | head -1)
+        DEB_FILE=\$(ls -t lightscope_*_all.deb 2>/dev/null | head -1)
         if [ -n \"\$DEB_FILE\" ] && [ -f \"\$DEB_FILE\" ]; then
             echo \"Found deb file: \$DEB_FILE\"
             cp \"\$DEB_FILE\" lightscope_latest.deb
             echo \"Successfully created lightscope_latest.deb from \$DEB_FILE\"
             ls -la lightscope_latest.deb
         else
-            echo \"Warning: No lightscope_*_amd64.deb file found to copy\"
+            echo \"Warning: No lightscope_*_all.deb file found to copy\"
             echo \"Current directory contents:\"
             ls -la
         fi

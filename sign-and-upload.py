@@ -225,48 +225,120 @@ def create_archives(upload_dir, version):
     print(f"Created zip archive: {zip_path}")
 
 def upload_to_server(version):
-    """Upload the tar.gz archive to the server via SCP"""
+    """Upload the tar.gz archive to the server via SCP and deploy with sudo"""
     import subprocess
-    
+    import getpass
+
     tar_file = f"lightscope_v{version}_upload.tar.gz"
-    
-    # Prompt for server credentials
-    print("\n📤 Server Upload Configuration")
-    print("=" * 40)
-    #server_user = input("Enter server username (e.g., user): ").strip()
-    #server_host = input("Enter server hostname (e.g., serveru): ").strip()
-    #remote_path = input("Enter remote path (e.g., path): ").strip()
+
+    # Server configuration
     server_user = "kapitans"
     server_host = "lightscope.isi.edu"
     remote_path = "/var/www/lightscope/latest/"
-    
-    # Ensure remote path ends with a slash if it's not empty
-    if remote_path and not remote_path.endswith('/'):
-        remote_path += '/'
-    
     remote_host = f"{server_user}@{server_host}"
-    
-    print(f"\nUploading {tar_file} to {remote_host}:{remote_path}")
-    print("Please enter your password when prompted...")
-    
-    try:
-        # Use scp to upload the file, allowing interactive password prompt
-        result = subprocess.run([
-            "scp", 
-            tar_file,
-            f"{remote_host}:{remote_path}"
-        ], check=True)
-        
-        print(f"✅ Successfully uploaded {tar_file} to server!")
-        
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to upload file: {e}")
-        print("You can manually upload later using:")
-        print(f"scp {tar_file} {remote_host}:{remote_path}")
-    except FileNotFoundError:
-        print("❌ scp command not found. Please install OpenSSH client.")
-        print("You can manually upload later using:")
-        print(f"scp {tar_file} {remote_host}:{remote_path}")
+
+    print("\n📤 Server Upload Configuration")
+    print("=" * 40)
+    print(f"Server: {remote_host}")
+    print(f"Target: {remote_path}")
+
+    # Check if sshpass is available for automated deployment
+    sshpass_available = subprocess.run(["which", "sshpass"], capture_output=True).returncode == 0
+
+    if not sshpass_available:
+        print("\n❌ sshpass is not installed.")
+        print("Install it with: brew install hudochenkov/sshpass/sshpass")
+        print("\nManual deployment:")
+        print(f"  scp {tar_file} {remote_host}:~/")
+        print(f"  ssh {remote_host}")
+        print(f"  sudo mv ~/{tar_file} {remote_path}")
+        print(f"  cd {remote_path} && sudo tar -xzf {tar_file}")
+        print(f"  sudo mv upload/* . && sudo rm -rf upload {tar_file}")
+        print(f"  sudo chown -R www-data:www-data {remote_path}")
+        sys.exit(1)
+
+    print(f"\nEnter password for {remote_host}:")
+    password = getpass.getpass()
+
+    if not password:
+        print("❌ No password provided. Aborting.")
+        sys.exit(1)
+
+    # Step 1: Upload to home directory
+    print(f"\n📤 Step 1: Uploading {tar_file} to home directory...")
+
+    result = subprocess.run([
+        "sshpass", "-p", password,
+        "scp", "-o", "BatchMode=no", "-o", "NumberOfPasswordPrompts=1",
+        tar_file, f"{remote_host}:~/"
+    ], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"❌ Upload failed (exit code {result.returncode})")
+        if "Permission denied" in result.stderr or "password" in result.stderr.lower():
+            print("   Authentication failed - check your password")
+        else:
+            print(f"   Error: {result.stderr.strip()}")
+        sys.exit(1)
+
+    print(f"✅ Uploaded {tar_file} to home directory")
+
+    # Step 2: SSH in and deploy with sudo
+    print(f"\n🔧 Step 2: Deploying on remote server...")
+
+    deploy_script = f'''
+echo "Moving archive to /tmp..."
+mv ~/{tar_file} /tmp/
+
+echo "Deploying with sudo..."
+sudo bash -c '
+    echo "Moving archive to target directory..."
+    mv /tmp/{tar_file} {remote_path}
+
+    echo "Changing to target directory..."
+    cd {remote_path}
+
+    echo "Extracting archive..."
+    tar -xzf {tar_file}
+
+    echo "Moving contents from upload directory..."
+    if [ -d upload ]; then
+        mv upload/* . 2>/dev/null || echo "No files in upload directory"
+        rm -rf upload/
+    fi
+
+    echo "Cleaning up archive..."
+    rm -f {tar_file}
+
+    echo "Setting proper permissions..."
+    chown -R www-data:www-data {remote_path}
+    chmod -R 644 {remote_path}* 2>/dev/null || true
+
+    echo "Final directory contents:"
+    ls -la {remote_path}
+'
+echo "Deployment complete!"
+'''
+
+    result = subprocess.run([
+        "sshpass", "-p", password,
+        "ssh", "-o", "NumberOfPasswordPrompts=1",
+        "-t", remote_host, deploy_script
+    ])
+
+    if result.returncode != 0:
+        print(f"\n❌ Deployment failed (exit code {result.returncode})")
+        # Try to clean up the uploaded file
+        subprocess.run([
+            "sshpass", "-p", password,
+            "ssh", remote_host, f"rm -f ~/{tar_file}"
+        ], capture_output=True)
+        sys.exit(1)
+
+    print(f"\n✅ Deployment complete!")
+    print(f"\n🧪 Test the deployment:")
+    print(f"curl https://thelightscope.com/latest/version")
+    print(f"curl https://thelightscope.com/latest/public-key")
 
 def main():
     parser = argparse.ArgumentParser(description="Sign LightScope core files")
@@ -376,7 +448,7 @@ def main():
     
     # Copy .deb package to output directory if it exists and requested
     if args.package_type in ["deb", "both"]:
-        deb_file = Path(f"lightscope_{version}_amd64.deb")
+        deb_file = Path(f"lightscope_{version}_all.deb")
         if deb_file.exists():
             deb_output = output_dir / deb_file.name
             shutil.copy2(deb_file, deb_output)
@@ -426,7 +498,7 @@ def main():
     print(f"  - version (version information)")
     
     # List package files if they exist
-    deb_file = output_dir / f"lightscope_{version}_amd64.deb"
+    deb_file = output_dir / f"lightscope_{version}_all.deb"
     if deb_file.exists():
         print(f"  - {deb_file.name} (Debian package)")
     

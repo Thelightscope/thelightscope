@@ -95,7 +95,7 @@ if [ -f "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem" ]; then
 fi
 
 # Build the package
-OUTPUT_FILE="${PACKAGE_NAME}_${VERSION}_amd64.deb"
+OUTPUT_FILE="${PACKAGE_NAME}_${VERSION}_all.deb"
 echo "Creating package: $OUTPUT_FILE"
 
 dpkg-deb --build "$BUILD_DIR" "$OUTPUT_FILE"
