@@ -36,7 +36,7 @@ pip install --upgrade pip
 
 # Install standard dependencies
 echo "Installing core dependencies..."
-pip install dpkt psutil requests cryptography
+pip install dpkt psutil requests cryptography packaging
 
 # Install systemd-python with error handling
 echo "Installing systemd-python for watchdog support..."

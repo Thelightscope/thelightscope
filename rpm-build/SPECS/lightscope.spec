@@ -209,6 +209,7 @@ print_status "📦 Installing Python packages into venv…"
     psutil \
     requests \
     python-libpcap \
+    packaging \
   && print_status "✅ pip modules installed" \
   || print_status "⚠️ pip install failed in venv"
 
