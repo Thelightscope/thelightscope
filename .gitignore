@@ -1,1 +1,13 @@
 lightscope-private.pem
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Build artifacts
+dist/
+build/
