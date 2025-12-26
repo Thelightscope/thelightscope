@@ -1,0 +1,62 @@
+# Maintainer: LightScope Team <e@alumni.usc.edu>
+pkgname=lightscope
+pkgver=0.0.122
+pkgrel=1
+pkgdesc="Network security monitoring and honeypot system"
+arch=('any')
+url="https://thelightscope.com"
+license=('custom:proprietary')
+depends=(
+    'python>=3.8'
+    'systemd'
+    'python-cryptography'
+    'python-pip'
+    'libpcap'
+    'gcc'
+)
+makedepends=(
+    'python'
+)
+backup=('opt/lightscope/config.ini')
+install=lightscope.install
+source=(
+    'lightscope_core.py'
+    'lightscope_runner.py'
+    'lightscope-public.pem'
+    'lightscope.service'
+    'config.ini.example'
+)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+    # Create directory structure
+    install -dm755 "$pkgdir/opt/lightscope/bin"
+    install -dm755 "$pkgdir/opt/lightscope/config"
+    install -dm755 "$pkgdir/opt/lightscope/logs"
+    install -dm755 "$pkgdir/opt/lightscope/updates"
+    install -dm755 "$pkgdir/usr/lib/systemd/system"
+    install -dm755 "$pkgdir/usr/share/lightscope"
+    install -dm755 "$pkgdir/usr/bin"
+
+    # Install main script
+    install -Dm644 "$srcdir/lightscope_core.py" "$pkgdir/opt/lightscope/bin/lightscope_core.py"
+
+    # Install runner script
+    install -Dm755 "$srcdir/lightscope_runner.py" "$pkgdir/opt/lightscope/bin/lightscope-runner.py"
+
+    # Install public key for signature verification
+    install -Dm644 "$srcdir/lightscope-public.pem" "$pkgdir/opt/lightscope/config/lightscope-public.pem"
+
+    # Install systemd service
+    install -Dm644 "$srcdir/lightscope.service" "$pkgdir/usr/lib/systemd/system/lightscope.service"
+
+    # Install config example
+    install -Dm644 "$srcdir/config.ini.example" "$pkgdir/usr/share/lightscope/config.ini.example"
+
+    # Create command line wrapper
+    cat > "$pkgdir/usr/bin/lightscope" << 'EOF'
+#!/bin/bash
+exec /opt/lightscope/venv/bin/python /opt/lightscope/bin/lightscope-runner.py "$@"
+EOF
+    chmod 755 "$pkgdir/usr/bin/lightscope"
+}

@@ -356,8 +356,8 @@ def main():
                        help="Verify signature after signing")
     parser.add_argument("--no-upload", action="store_true",
                        help="Skip uploading to server via SCP")
-    parser.add_argument("--package-type", choices=["deb", "rpm", "both"], default="both",
-                       help="Which package type to include (default: both)")
+    parser.add_argument("--package-type", choices=["deb", "rpm", "arch", "all"], default="all",
+                       help="Which package type to include (default: all)")
     
     args = parser.parse_args()
     
@@ -447,7 +447,7 @@ def main():
     shutil.copy2(args.public_key, output_dir / "lightscope-public.pem")
     
     # Copy .deb package to output directory if it exists and requested
-    if args.package_type in ["deb", "both"]:
+    if args.package_type in ["deb", "all"]:
         deb_file = Path(f"lightscope_{version}_all.deb")
         if deb_file.exists():
             deb_output = output_dir / deb_file.name
@@ -455,13 +455,13 @@ def main():
             print(f"Added .deb package: {deb_output}")
         else:
             print(f"Note: .deb package not found: {deb_file}")
-    
+
     # Copy .rpm package to output directory if it exists and requested
-    if args.package_type in ["rpm", "both"]:
+    if args.package_type in ["rpm", "all"]:
         import glob
         rpm_pattern = f"lightscope-{version}-*.noarch.rpm"
         rpm_files = glob.glob(rpm_pattern)
-        
+
         if rpm_files:
             # Use the first matching RPM file (there should only be one)
             rpm_file = Path(rpm_files[0])
@@ -470,6 +470,31 @@ def main():
             print(f"Added .rpm package: {rpm_output}")
         else:
             print(f"Note: .rpm package not found: {rpm_pattern}")
+
+    # Copy Arch Linux package to output directory if it exists and requested
+    if args.package_type in ["arch", "all"]:
+        import glob
+        # Try to find .pkg.tar.zst or .pkg.tar.xz files (Arch package formats)
+        arch_patterns = [
+            f"lightscope-{version}-*.pkg.tar.zst",
+            f"lightscope-{version}-*.pkg.tar.xz",
+            f"lightscope-{version}-*.pkg.tar.*",
+            f"*-arch-src.tar.gz"  # Source tarball for building on Arch
+        ]
+
+        arch_found = False
+        for pattern in arch_patterns:
+            arch_files = glob.glob(pattern)
+            if arch_files:
+                arch_file = Path(arch_files[0])
+                arch_output = output_dir / arch_file.name
+                shutil.copy2(arch_file, arch_output)
+                print(f"Added Arch Linux package: {arch_output}")
+                arch_found = True
+                break
+
+        if not arch_found:
+            print(f"Note: Arch Linux package not found")
     
     # Create version info
     version_info = create_version_info(output_core, version)
@@ -501,13 +526,24 @@ def main():
     deb_file = output_dir / f"lightscope_{version}_all.deb"
     if deb_file.exists():
         print(f"  - {deb_file.name} (Debian package)")
-    
+
     # Look for any RPM files in output directory
     import glob
     rpm_files = glob.glob(str(output_dir / f"lightscope-{version}-*.noarch.rpm"))
     for rpm_file in rpm_files:
         rpm_name = Path(rpm_file).name
         print(f"  - {rpm_name} (RPM package)")
+
+    # Look for any Arch Linux packages in output directory
+    arch_patterns = [
+        str(output_dir / f"lightscope-{version}-*.pkg.tar.*"),
+        str(output_dir / f"*-arch-src.tar.gz")
+    ]
+    for pattern in arch_patterns:
+        arch_files = glob.glob(pattern)
+        for arch_file in arch_files:
+            arch_name = Path(arch_file).name
+            print(f"  - {arch_name} (Arch Linux package)")
     print("\nArchives created:")
     print(f"  - lightscope_v{version}_upload.tar.gz")
     print(f"  - lightscope_v{version}_upload.zip")
