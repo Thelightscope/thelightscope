@@ -1,83 +1,114 @@
-# LightScope for macOS v1.0.3
+# LightScope
 
-## Installation
+**See Your Scanners**
 
-1. Run the installation script:
-   ```
-   ./install.sh
-   ```
+<p align="center">
+  <img src="ls.png" alt="LightScope" width="128">
+</p>
 
-2. When prompted, allow the BPF permissions setup for packet capture
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker-lightgrey.svg)]()
 
-3. LightScope will start automatically and run in the background
+LightScope is a lightweight, open-source network security monitor that transforms closed ports into honeypots. See who's scanning your systems without dedicated infrastructure.
 
-## Network Monitoring
+Provided by [USC Information Sciences Institute](https://www.isi.edu/).
 
-LightScope monitors network traffic using the Berkeley Packet Filter (BPF). This requires special permissions but does NOT require running as root.
+## What It Does
 
-### First-time Setup
+- Monitors closed ports for attacker connections
+- Runs honeypot services to observe attack patterns
+- Reports attackers to AbuseIPDB and ISPs
+- Generates personalized IP blocklists
+- Provides a web dashboard at [thelightscope.com](https://thelightscope.com)
 
-The installer will offer to run the BPF permissions setup script:
+## What It Isn't
+
+LightScope is not antivirus or EDR. It won't slow down your system or interfere with your applications. It observes network traffic passively and runs lightweight honeypot services on ports you're not using.
+
+## Use Cases
+
+**Servers**: See who's targeting your infrastructure. Get automatic ISP abuse reporting.
+
+**Home/Laptop**: Detect compromised routers or IoT devices on your network. Identify threats on public WiFi.
+
+## Quick Install
+
+### Linux (Debian/Ubuntu)
+
+```bash
+curl -O https://thelightscope.com/latest/lightscope_latest.deb
+sudo dpkg -i lightscope_latest.deb
 ```
-sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh
+
+### Linux (RHEL/Fedora/CentOS)
+
+```bash
+curl -O https://thelightscope.com/latest/lightscope_latest.rpm
+sudo rpm -i lightscope_latest.rpm
 ```
 
-This one-time setup:
-- Creates an 'access_bpf' group
-- Adds you to the group
-- Sets up automatic BPF permissions at boot
-- Allows packet capture without root privileges
+### macOS
 
-### Manual BPF Setup
+Download from [Releases](https://github.com/Thelightscope/thelightscope/releases) and run the installer.
 
-If you skipped the setup during installation, you can run it later:
-```
-sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh
+### Container
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thelightscope/lightscope/main/install-lightscope-container.sh | bash
 ```
 
-## Configuration
+### Windows
 
-Edit the configuration file at:
-`/Applications/LightScope.app/Contents/Resources/config/config.ini`
-
-## Logs
-
-View logs at:
-`/Applications/LightScope.app/Contents/Resources/logs/`
-
-## Management
-
-- **Stop**: `launchctl unload ~/Library/LaunchAgents/com.thelightscope.lightscope.plist`
-- **Start**: `launchctl load ~/Library/LaunchAgents/com.thelightscope.lightscope.plist`
-- **Uninstall**: `./uninstall.sh`
-
-## Requirements
-
-- macOS 10.14 or later
-- Python 3.8 or later
-- Network access for monitoring
-- BPF permissions for packet capture
+Download the installer from [Releases](https://github.com/Thelightscope/thelightscope/releases) and run as Administrator.
 
 ## Features
 
-- Runs as user application (no root required)
-- Automatic startup at login
-- Background operation
-- Network packet monitoring
-- Honeypot functionality
-- Automatic updates
+- Packet capture and traffic analysis
+- Honeypot services on configurable ports
+- Automatic detection of unwanted connections
+- Secure auto-updates with signature verification
+- Runs as a system service (systemd, launchd, Windows Service)
+- Web dashboard for monitoring
 
-## Security
+## Privacy
 
-- Does not require root privileges to run
-- Uses Berkeley Packet Filter (BPF) for safe packet capture
-- Group-based permissions following macOS security best practices
-- Same approach used by Wireshark and other professional tools
+LightScope anonymizes all data before transmission:
 
-## Troubleshooting
+- Internal IP addresses are randomized
+- No personally identifiable information is collected
+- Anonymization methods are IRB-approved (study UP-25-00124)
 
-If packet capture fails:
-1. Check BPF permissions: `ls -la /dev/bpf*`
-2. Verify group membership: `groups`
-3. Re-run setup: `sudo /Applications/LightScope.app/Contents/Resources/setup_bpf_permissions.sh`
-4. Log out and log back in for group changes to take effect
+## Documentation
+
+- Installation
+  - [Linux (dpkg)](docs/installation/linux-dpkg.md)
+  - [macOS](docs/installation/macos.md)
+  - [Windows](docs/installation/windows.md)
+  - [Container](docs/installation/container.md)
+- [Container Quick Start](docs/container-quickstart.md)
+- [Building Packages](docs/build.md)
+- [Deployment](docs/deployment.md)
+- [Firewall Configuration](docs/firewall.md)
+
+## Configuration
+
+After installation, edit the config file:
+
+- Linux: `/opt/lightscope/config/config.ini`
+- macOS: `/Applications/LightScope.app/Contents/Resources/config/config.ini`
+- Windows: `C:\Program Files\LightScope\config\config.ini`
+- Container: `/opt/lightscope-container/config/config.ini`
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+## Support
+
+- Website: https://thelightscope.com
+- Issues: https://github.com/Thelightscope/thelightscope/issues
+- Email: e@alumni.usc.edu
