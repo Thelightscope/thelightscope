@@ -18,7 +18,7 @@ import threading
 try:
     import pcap
 except ImportError:
-    print("Error: pypcap not found. Install with: pkg install py311-pypcap", file=sys.stderr)
+    print("Error: python-libpcap not found. Install with: pkg install py311-libpcap", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -30,8 +30,7 @@ except ImportError:
 
 # pflog header structure (FreeBSD)
 # See /usr/include/net/if_pflog.h
-# Structure size: 1+1+1+1+16+16+4+4+4+4+4+4+1+3+4+1+3 = 72 bytes
-PFLOG_HDRLEN = 72  # FreeBSD pflog header length
+PFLOG_HDRLEN = 100  # FreeBSD pflog header length
 
 # PacketInfo namedtuple - compatible with lightscope_core.py
 PacketInfo = namedtuple("PacketInfo", [

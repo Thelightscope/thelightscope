@@ -7,7 +7,7 @@
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker-lightgrey.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker%20%7C%20OPNsense-lightgrey.svg)]()
 
 LightScope is a lightweight, open-source network security monitor that transforms closed ports into honeypots. See who's scanning your systems without dedicated infrastructure.
 
@@ -61,6 +61,22 @@ curl -fsSL https://raw.githubusercontent.com/thelightscope/lightscope/main/insta
 
 Download the installer from [Releases](https://github.com/Thelightscope/thelightscope/releases) and run as Administrator.
 
+### OPNsense
+
+```bash
+# Build the plugin
+cd /usr/plugins/security/lightscope
+make package
+
+# Install
+pkg install work/pkg/os-lightscope-1.0.pkg
+
+# Start
+service os-lightscope onestart
+```
+
+See [OPNsense/README.md](OPNsense/README.md) for detailed instructions.
+
 ## Features
 
 - Packet capture and traffic analysis
@@ -85,6 +101,7 @@ LightScope anonymizes all data before transmission:
   - [macOS](docs/installation/macos.md)
   - [Windows](docs/installation/windows.md)
   - [Container](docs/installation/container.md)
+  - [OPNsense](OPNsense/README.md)
 - [Container Quick Start](docs/container-quickstart.md)
 - [Building Packages](docs/build.md)
 - [Deployment](docs/deployment.md)
@@ -98,6 +115,7 @@ After installation, edit the config file:
 - macOS: `/Applications/LightScope.app/Contents/Resources/config/config.ini`
 - Windows: `C:\Program Files\LightScope\config\config.ini`
 - Container: `/opt/lightscope-container/config/config.ini`
+- OPNsense: `/usr/local/etc/lightscope.conf`
 
 ## Contributing
 
