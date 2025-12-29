@@ -112,3 +112,23 @@ function lightscope_xmlrpc_sync()
     $result['services'] = array('lightscope');
     return array($result);
 }
+
+function lightscope_configure()
+{
+    return array(
+        'bootup' => array('lightscope_configure_do')
+    );
+}
+
+function lightscope_configure_do($verbose = false)
+{
+    if (lightscope_enabled()) {
+        if ($verbose) {
+            echo 'Starting LightScope...';
+        }
+        configd_run('lightscope start');
+        if ($verbose) {
+            echo "done.\n";
+        }
+    }
+}

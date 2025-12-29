@@ -16,7 +16,15 @@ rcvar="${name}_enable"
 
 load_rc_config $name
 
-: ${lightscope_enable:="NO"}
+# Check OPNsense model for enabled state if not explicitly set
+if [ -z "${lightscope_enable}" ]; then
+    if /usr/local/sbin/pluginctl -g OPNsense.Lightscope.general.enabled 2>/dev/null | grep -q "1"; then
+        lightscope_enable="YES"
+    else
+        lightscope_enable="NO"
+    fi
+fi
+
 : ${lightscope_config:="/usr/local/etc/lightscope.conf"}
 
 pidfile="/var/run/${name}.pid"
