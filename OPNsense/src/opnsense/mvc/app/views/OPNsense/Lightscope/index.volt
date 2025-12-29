@@ -125,7 +125,7 @@
 
 <div class="content-box">
     <div class="content-box-header">
-        <h3><i class="fa fa-shield"></i> LightScope Security Monitor</h3>
+        <h3><i class="fa fa-shield"></i> LightScope Cybersecurity Research Honeypot and Telescope</h3>
     </div>
     <div class="content-box-main">
         <!-- Status Section -->

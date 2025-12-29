@@ -34,7 +34,7 @@ function lightscope_services()
 
     if (lightscope_enabled()) {
         $services[] = array(
-            'description' => gettext('LightScope Security Monitor'),
+            'description' => gettext('LightScope Cybersecurity Research Honeypot and Telescope'),
             'configd' => array(
                 'restart' => array('lightscope restart'),
                 'start' => array('lightscope start'),

@@ -6,8 +6,13 @@
 # University of Southern California Information Sciences Institute
 #
 
-# Generate config from OPNsense template system
-/usr/local/opnsense/service/configd_ctl.py template reload OPNsense/Lightscope
+CONFIG_FILE="/usr/local/etc/lightscope.conf"
+
+# Update honeypot_ports from OPNsense model (preserves database ID)
+HONEYPOT_PORTS=$(/usr/local/sbin/pluginctl -g OPNsense.Lightscope.general.honeypot_ports 2>/dev/null)
+if [ -n "$HONEYPOT_PORTS" ] && [ -f "$CONFIG_FILE" ]; then
+    sed -i '' "s/^honeypot_ports.*/honeypot_ports = $HONEYPOT_PORTS/" "$CONFIG_FILE"
+fi
 
 # Reload firewall rules (for honeypot ports)
 /usr/local/etc/rc.filter_configure

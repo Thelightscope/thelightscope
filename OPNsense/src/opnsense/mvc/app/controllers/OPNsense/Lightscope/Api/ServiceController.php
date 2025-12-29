@@ -35,6 +35,5 @@ class ServiceController extends ApiMutableServiceControllerBase
 {
     protected static $internalServiceClass = '\OPNsense\Lightscope\Lightscope';
     protected static $internalServiceEnabled = 'general.enabled';
-    protected static $internalServiceTemplate = 'OPNsense/Lightscope';
     protected static $internalServiceName = 'lightscope';
 }

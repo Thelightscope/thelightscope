@@ -1,7 +1,7 @@
 <model>
     <mount>//OPNsense/Lightscope</mount>
     <version>1.0.0</version>
-    <description>LightScope Security Monitor configuration</description>
+    <description>LightScope Cybersecurity Research Honeypot and Telescope</description>
     <items>
         <general>
             <enabled type="BooleanField">
