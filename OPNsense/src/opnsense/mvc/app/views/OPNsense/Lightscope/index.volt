@@ -161,6 +161,11 @@
         <!-- Settings Form -->
         {{ partial("layout_partials/base_form", ['fields': settings, 'id': 'frm_GeneralSettings']) }}
 
+        <div class="alert alert-info" style="margin-top: 15px;">
+            <i class="fa fa-info-circle"></i>
+            <strong>Note:</strong> Enable logging on your explicit block/reject firewall rules for LightScope to see that traffic.
+        </div>
+
         <hr/>
 
         <!-- Action Buttons -->

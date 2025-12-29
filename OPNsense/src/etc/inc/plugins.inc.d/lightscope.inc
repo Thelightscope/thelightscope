@@ -66,6 +66,24 @@ function lightscope_firewall($fw)
     }
 
     $model = new \OPNsense\Lightscope\Lightscope();
+
+    // Add block+log rule - catches blocked TCP for LightScope visibility
+    // Uses very high priority to run last, catching traffic that falls through
+    $fw->registerFilterRule(
+        999999,  // highest priority - run as late as possible
+        array(
+            'type' => 'block',
+            'from' => 'any',
+            'to' => '(self)',
+            'direction' => 'in',
+            'protocol' => 'tcp',
+            'descr' => 'LightScope: log blocked TCP',
+            'log' => true,
+            '#ref' => 'lightscope_blocklog'
+        ),
+        null
+    );
+
     $honeypot_ports = (string)$model->general->honeypot_ports;
 
     if (empty($honeypot_ports)) {

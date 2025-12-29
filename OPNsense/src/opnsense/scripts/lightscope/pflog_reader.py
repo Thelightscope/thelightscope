@@ -33,7 +33,7 @@ except ImportError:
 # Structure size: 1+1+1+1+16+16+4+4+4+4+4+4+1+3+4+1+3 = 72 bytes
 PFLOG_HDRLEN = 72  # FreeBSD pflog header length
 
-# pflog action values (from /usr/include/net/pfvar.h)
+# pflog action values (from /usr/include/netpfil/pf/pf.h)
 PF_PASS = 0
 PF_DROP = 1
 
