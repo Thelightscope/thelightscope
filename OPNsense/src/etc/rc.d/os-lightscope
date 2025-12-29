@@ -20,12 +20,41 @@ load_rc_config $name
 : ${lightscope_config:="/usr/local/etc/lightscope.conf"}
 
 pidfile="/var/run/${name}.pid"
-command="/usr/local/bin/python3"
-command_args="/usr/local/opnsense/scripts/lightscope/lightscope_daemon.py"
-command_interpreter="/usr/local/bin/python3"
+procname="/usr/local/bin/python3"
+
+start_cmd="${name}_start"
+stop_cmd="${name}_stop"
+status_cmd="${name}_status"
 
 start_precmd="${name}_prestart"
-stop_postcmd="${name}_poststop"
+
+lightscope_start()
+{
+    echo "Starting ${name}."
+    /usr/sbin/daemon -c -f -p ${pidfile} -o /var/log/lightscope.log /usr/local/bin/python3 -u /usr/local/opnsense/scripts/lightscope/lightscope_daemon.py
+}
+
+lightscope_stop()
+{
+    if [ -f ${pidfile} ]; then
+        echo "Stopping ${name}."
+        kill -TERM $(cat ${pidfile}) 2>/dev/null
+        rm -f ${pidfile}
+    else
+        echo "${name} is not running."
+    fi
+}
+
+lightscope_status()
+{
+    if [ -f ${pidfile} ] && kill -0 $(cat ${pidfile}) 2>/dev/null; then
+        echo "${name} is running as pid $(cat ${pidfile})."
+        return 0
+    else
+        echo "${name} is not running."
+        return 1
+    fi
+}
 
 lightscope_prestart()
 {
@@ -43,13 +72,6 @@ lightscope_prestart()
         ifconfig pflog0 create
     fi
 
-    return 0
-}
-
-lightscope_poststop()
-{
-    # Clean up pid file
-    rm -f ${pidfile}
     return 0
 }
 

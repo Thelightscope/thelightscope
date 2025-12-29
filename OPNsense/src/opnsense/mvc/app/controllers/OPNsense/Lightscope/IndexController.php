@@ -27,41 +27,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-namespace OPNsense\Lightscope\Api;
+namespace OPNsense\Lightscope;
 
-use OPNsense\Base\ApiControllerBase;
-use OPNsense\Core\Backend;
-
-class StatusController extends ApiControllerBase
+/**
+ * Class IndexController
+ * @package OPNsense\Lightscope
+ */
+class IndexController extends \OPNsense\Base\IndexController
 {
     /**
-     * Get LightScope status including database name and dashboard URL
-     * @return array status information
+     * Default index action
      */
-    public function statusAction()
+    public function indexAction()
     {
-        $response = json_decode(trim((new Backend())->configdRun('lightscope status')), true);
-        if ($response !== null) {
-            return $response;
-        }
-        return [
-            'status' => 'unknown',
-            'database' => '',
-            'dashboard_url' => '',
-            'error' => 'Unable to determine LightScope status'
-        ];
-    }
-
-    /**
-     * Get LightScope service logs
-     * @return array log content
-     */
-    public function logsAction()
-    {
-        $response = json_decode(trim((new Backend())->configdRun('lightscope logs')), true);
-        if ($response !== null) {
-            return $response;
-        }
-        return ['logs' => 'Unable to retrieve logs'];
+        $this->view->settings = $this->getForm("settings");
+        $this->view->pick('OPNsense/Lightscope/index');
     }
 }

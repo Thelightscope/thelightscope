@@ -1,7 +1,8 @@
 <?php
 
 /*
- * Copyright (c) 2025 USC Information Sciences Institute
+ * Copyright (c) 2025 Eric Kapitanski <e@alumni.usc.edu>
+ * University of Southern California Information Sciences Institute
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

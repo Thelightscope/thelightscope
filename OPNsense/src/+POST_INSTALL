@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Set executable permissions on scripts
+chmod +x /usr/local/opnsense/scripts/lightscope/*.py 2>/dev/null
+chmod +x /usr/local/opnsense/scripts/lightscope/*.sh 2>/dev/null
+chmod +x /usr/local/etc/rc.d/os-lightscope 2>/dev/null
+
 # Install Python dependencies via pip if not already present
 if ! /usr/local/bin/python3.11 -c "import dpkt" 2>/dev/null; then
     echo "Installing LightScope Python dependencies..."
@@ -8,4 +13,4 @@ if ! /usr/local/bin/python3.11 -c "import dpkt" 2>/dev/null; then
 fi
 
 echo "LightScope installed successfully."
-echo "To start: service os-lightscope start"
+echo "Configure via Services -> LightScope in the web UI."

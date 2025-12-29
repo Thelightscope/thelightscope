@@ -37,18 +37,19 @@ def get_status():
         except Exception as e:
             result["config_error"] = str(e)
 
-    # Check if service is running
+    # Check if service is running via pid file
+    pidfile = "/var/run/lightscope.pid"
     try:
-        proc = subprocess.run(
-            ["/usr/local/etc/rc.d/os-lightscope", "status"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if proc.returncode == 0 and "running" in proc.stdout.lower():
+        if os.path.exists(pidfile):
+            with open(pidfile, 'r') as f:
+                pid = int(f.read().strip())
+            # Check if process is actually running
+            os.kill(pid, 0)  # Signal 0 just checks if process exists
             result["status"] = "running"
         else:
             result["status"] = "stopped"
+    except (ProcessLookupError, ValueError, PermissionError):
+        result["status"] = "stopped"
     except Exception:
         result["status"] = "unknown"
 

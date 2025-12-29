@@ -29,39 +29,14 @@
 
 namespace OPNsense\Lightscope\Api;
 
-use OPNsense\Base\ApiControllerBase;
-use OPNsense\Core\Backend;
+use OPNsense\Base\ApiMutableModelControllerBase;
 
-class StatusController extends ApiControllerBase
+/**
+ * Class SettingsController
+ * @package OPNsense\Lightscope\Api
+ */
+class SettingsController extends ApiMutableModelControllerBase
 {
-    /**
-     * Get LightScope status including database name and dashboard URL
-     * @return array status information
-     */
-    public function statusAction()
-    {
-        $response = json_decode(trim((new Backend())->configdRun('lightscope status')), true);
-        if ($response !== null) {
-            return $response;
-        }
-        return [
-            'status' => 'unknown',
-            'database' => '',
-            'dashboard_url' => '',
-            'error' => 'Unable to determine LightScope status'
-        ];
-    }
-
-    /**
-     * Get LightScope service logs
-     * @return array log content
-     */
-    public function logsAction()
-    {
-        $response = json_decode(trim((new Backend())->configdRun('lightscope logs')), true);
-        if ($response !== null) {
-            return $response;
-        }
-        return ['logs' => 'Unable to retrieve logs'];
-    }
+    protected static $internalModelClass = '\OPNsense\Lightscope\Lightscope';
+    protected static $internalModelName = 'lightscope';
 }
