@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Install Python dependencies via pip if not already present
+if ! /usr/local/bin/python3.11 -c "import dpkt" 2>/dev/null; then
+    echo "Installing LightScope Python dependencies..."
+    /usr/local/bin/python3.11 -m ensurepip --default-pip 2>/dev/null || true
+    /usr/local/bin/python3.11 -m pip install --quiet dpkt requests psutil pypcap
+fi
+
+echo "LightScope installed successfully."
+echo "To start: service os-lightscope start"

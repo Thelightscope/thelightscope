@@ -65,11 +65,11 @@ class LightScopeConfig:
         self._load_or_create_config()
 
     def _generate_database_name(self):
-        """Generate a unique database name."""
+        """Generate a unique database name with OPNsense prefix."""
         import datetime
         today = datetime.date.today().strftime("%Y%m%d")
-        rand_part = ''.join(random.choices(string.ascii_lowercase, k=47))
-        return f"{today}_{rand_part}"
+        rand_part = ''.join(random.choices(string.ascii_lowercase, k=44))
+        return f"opn{today}_{rand_part}"
 
     def _generate_randomization_key(self):
         """Generate a randomization key."""
@@ -229,7 +229,6 @@ class PacketProcessor:
         self.system_info = system_info
         self.upload_pipe = upload_pipe
         self.packet_count = 0
-        self.last_heartbeat = time.monotonic()
         self.HEARTBEAT_INTERVAL = 15 * 60  # 15 minutes
 
     def process_batch(self, batch):
@@ -237,12 +236,6 @@ class PacketProcessor:
         for pkt in batch:
             self.packet_count += 1
             self._prepare_and_send(pkt)
-
-        # Send heartbeat if needed
-        now = time.monotonic()
-        if now - self.last_heartbeat >= self.HEARTBEAT_INTERVAL:
-            self._send_heartbeat()
-            self.last_heartbeat = now
 
     def _prepare_and_send(self, pkt):
         """Prepare packet data and send to uploader."""
@@ -349,6 +342,18 @@ def packet_handler(pflog_pipe, upload_pipe, config, external_info, system_info):
     processor = PacketProcessor(config, external_info, system_info, upload_pipe)
 
     print("packet_handler: Started", flush=True)
+
+    # Send initial heartbeat at startup
+    processor._send_heartbeat()
+
+    # Start a background thread for periodic heartbeats
+    def heartbeat_loop():
+        while True:
+            time.sleep(processor.HEARTBEAT_INTERVAL)
+            processor._send_heartbeat()
+
+    hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    hb_thread.start()
 
     while True:
         try:

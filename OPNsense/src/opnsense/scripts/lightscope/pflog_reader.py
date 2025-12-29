@@ -33,6 +33,10 @@ except ImportError:
 # Structure size: 1+1+1+1+16+16+4+4+4+4+4+4+1+3+4+1+3 = 72 bytes
 PFLOG_HDRLEN = 72  # FreeBSD pflog header length
 
+# pflog action values (from /usr/include/net/pfvar.h)
+PF_PASS = 0
+PF_DROP = 1
+
 # PacketInfo namedtuple - compatible with lightscope_core.py
 PacketInfo = namedtuple("PacketInfo", [
     "packet_num", "proto", "packet_time",
@@ -66,11 +70,17 @@ def parse_pflog_packet(buf, packet_num):
     Parse a pflog packet and extract TCP SYN information.
 
     pflog packets have a pflog header followed by the IP packet.
-    We only care about TCP SYN packets.
+    We only care about blocked TCP SYN packets.
 
-    Returns PacketInfo namedtuple or None if not a TCP SYN.
+    Returns PacketInfo namedtuple or None if not a blocked TCP SYN.
     """
     if len(buf) < PFLOG_HDRLEN:
+        return None
+
+    # Extract action from pflog header (byte offset 2)
+    # Only process blocked packets (PF_DROP)
+    action = buf[2]
+    if action != PF_DROP:
         return None
 
     # Skip pflog header to get to IP packet
