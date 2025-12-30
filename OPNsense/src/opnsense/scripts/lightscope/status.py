@@ -18,8 +18,10 @@ def get_firewall_allowed_ports():
     """
     Get list of ports that have PASS/ALLOW rules in the firewall.
     These are ports where legitimate services may be running.
+    Returns a set of individual ports AND a list of (start, end) tuples for ranges.
     """
     allowed_ports = set()
+    allowed_ranges = []
 
     try:
         # Get active pf rules
@@ -34,14 +36,22 @@ def get_firewall_allowed_ports():
             for line in result.stdout.split('\n'):
                 # Look for pass rules with port specifications
                 # Example: pass in on em0 proto tcp from any to any port = 22
+                # Example: pass in on em0 proto tcp from any to any port 1:4343
                 if line.startswith('pass') and 'proto tcp' in line:
-                    # Extract port number(s)
-                    # Match patterns like "port = 22" or "port 22" or "port { 22 80 443 }"
-                    port_match = re.search(r'port\s*[=]?\s*(\d+)', line)
+                    # Match port ranges like "port 1:4343" or "port 80:443"
+                    range_match = re.search(r'port\s*[=]?\s*(\d+):(\d+)', line)
+                    if range_match:
+                        start_port = int(range_match.group(1))
+                        end_port = int(range_match.group(2))
+                        allowed_ranges.append((start_port, end_port))
+                        continue  # Don't also match as single port
+
+                    # Match single port patterns like "port = 22" or "port 22"
+                    port_match = re.search(r'port\s*[=]?\s*(\d+)(?![\d:])', line)
                     if port_match:
                         allowed_ports.add(int(port_match.group(1)))
 
-                    # Match port ranges or lists in braces
+                    # Match port lists in braces like "port { 22 80 443 }"
                     brace_match = re.search(r'port\s*[=]?\s*\{([^}]+)\}', line)
                     if brace_match:
                         ports_str = brace_match.group(1)
@@ -50,7 +60,17 @@ def get_firewall_allowed_ports():
     except Exception as e:
         pass
 
-    return allowed_ports
+    return allowed_ports, allowed_ranges
+
+
+def is_port_allowed_by_firewall(port, allowed_ports, allowed_ranges):
+    """Check if a port is allowed by firewall rules (including ranges)."""
+    if port in allowed_ports:
+        return True
+    for start, end in allowed_ranges:
+        if start <= port <= end:
+            return True
+    return False
 
 
 def get_lightscope_pids():
@@ -137,7 +157,7 @@ def get_port_status(ports_string):
     if not ports_string:
         return port_status
 
-    allowed_ports = get_firewall_allowed_ports()
+    allowed_ports, allowed_ranges = get_firewall_allowed_ports()
     lightscope_pids = get_lightscope_pids()
 
     for p in ports_string.split(','):
@@ -145,7 +165,7 @@ def get_port_status(ports_string):
         if p.isdigit():
             port = int(p)
             if 1 <= port <= 65535:
-                if port in allowed_ports:
+                if is_port_allowed_by_firewall(port, allowed_ports, allowed_ranges):
                     # Port has a firewall ALLOW rule - potential conflict
                     port_status[port] = "firewall_conflict"
                 elif is_port_in_use_by_other(port, lightscope_pids):

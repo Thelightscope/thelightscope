@@ -73,7 +73,7 @@
                             } else if (pstatus === 'firewall_conflict') {
                                 badge = '<span class="label label-danger"><i class="fa fa-fire"></i> ' + port + ' (firewall allow rule)</span> ';
                             } else if (pstatus === 'in_use') {
-                                badge = '<span class="label label-warning"><i class="fa fa-server"></i> ' + port + ' (in use on OPNsense)</span> ';
+                                badge = '<span class="label label-danger"><i class="fa fa-server"></i> ' + port + ' (in use on OPNsense)</span> ';
                             }
                             portHtml += badge;
                         }

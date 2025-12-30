@@ -70,8 +70,10 @@ class HoneypotListener:
         """
         Get list of ports that have PASS/ALLOW rules in the firewall.
         These are ports where legitimate services may be running.
+        Returns a tuple of (set of ports, list of (start, end) range tuples).
         """
         allowed_ports = set()
+        allowed_ranges = []
 
         try:
             result = subprocess.run(
@@ -85,8 +87,16 @@ class HoneypotListener:
                 for line in result.stdout.split('\n'):
                     # Look for pass rules with port specifications
                     if line.startswith('pass') and 'proto tcp' in line:
-                        # Match patterns like "port = 22" or "port 22"
-                        port_match = re.search(r'port\s*[=]?\s*(\d+)', line)
+                        # Match port ranges like "port 1:4343" or "port 80:443"
+                        range_match = re.search(r'port\s*[=]?\s*(\d+):(\d+)', line)
+                        if range_match:
+                            start_port = int(range_match.group(1))
+                            end_port = int(range_match.group(2))
+                            allowed_ranges.append((start_port, end_port))
+                            continue  # Don't also match as single port
+
+                        # Match single port patterns like "port = 22" or "port 22"
+                        port_match = re.search(r'port\s*[=]?\s*(\d+)(?![\d:])', line)
                         if port_match:
                             allowed_ports.add(int(port_match.group(1)))
 
@@ -99,7 +109,16 @@ class HoneypotListener:
         except Exception as e:
             print(f"honeypot: Error checking firewall rules: {e}", flush=True)
 
-        return allowed_ports
+        return allowed_ports, allowed_ranges
+
+    def is_port_allowed_by_firewall(self, port, allowed_ports, allowed_ranges):
+        """Check if a port is allowed by firewall rules (including ranges)."""
+        if port in allowed_ports:
+            return True
+        for start, end in allowed_ranges:
+            if start <= port <= end:
+                return True
+        return False
 
     def is_port_in_use(self, port):
         """
@@ -128,12 +147,12 @@ class HoneypotListener:
                 break
 
             try:
-                allowed_ports = self.get_firewall_allowed_ports()
+                allowed_ports, allowed_ranges = self.get_firewall_allowed_ports()
 
                 with self.sockets_lock:
                     sockets_to_close = []
                     for sock, port in list(self.sockets.items()):
-                        if port in allowed_ports:
+                        if self.is_port_allowed_by_firewall(port, allowed_ports, allowed_ranges):
                             print(f"honeypot: WARNING - Firewall ALLOW rule detected for port {port}, closing honeypot on this port", flush=True)
                             sockets_to_close.append((sock, port, "firewall conflict"))
 
@@ -187,10 +206,10 @@ class HoneypotListener:
             return
 
         # Check for firewall conflicts and ports already in use
-        allowed_ports = self.get_firewall_allowed_ports()
+        allowed_ports, allowed_ranges = self.get_firewall_allowed_ports()
         safe_ports = []
         for port in ports:
-            if port in allowed_ports:
+            if self.is_port_allowed_by_firewall(port, allowed_ports, allowed_ranges):
                 print(f"honeypot: WARNING - Port {port} has a firewall ALLOW rule, skipping (may conflict with legitimate service)", flush=True)
             elif self.is_port_in_use(port):
                 print(f"honeypot: WARNING - Port {port} is already in use by another service, skipping", flush=True)
