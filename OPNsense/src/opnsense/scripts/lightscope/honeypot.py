@@ -101,12 +101,26 @@ class HoneypotListener:
 
         return allowed_ports
 
+    def is_port_in_use(self, port):
+        """
+        Check if a port is already in use by another service.
+        Returns True if port is in use, False if available.
+        """
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_sock.bind(("", port))
+            test_sock.close()
+            return False  # Port is available
+        except OSError:
+            return True  # Port is in use
+
     def _firewall_monitor_thread(self):
         """
-        Monitor firewall rules every FIREWALL_CHECK_INTERVAL seconds.
-        If a new ALLOW rule is detected for an active honeypot port, close that port.
+        Monitor firewall rules and port usage every FIREWALL_CHECK_INTERVAL seconds.
+        If a new ALLOW rule is detected or port becomes in use, close that honeypot port.
         """
-        print("honeypot: Started firewall monitor (checking every 10s)", flush=True)
+        print("honeypot: Started firewall/port monitor (checking every 10s)", flush=True)
 
         while self.running:
             time.sleep(self.FIREWALL_CHECK_INTERVAL)
@@ -121,15 +135,15 @@ class HoneypotListener:
                     for sock, port in list(self.sockets.items()):
                         if port in allowed_ports:
                             print(f"honeypot: WARNING - Firewall ALLOW rule detected for port {port}, closing honeypot on this port", flush=True)
-                            sockets_to_close.append((sock, port))
+                            sockets_to_close.append((sock, port, "firewall conflict"))
 
-                    for sock, port in sockets_to_close:
+                    for sock, port, reason in sockets_to_close:
                         try:
                             sock.close()
                         except:
                             pass
                         del self.sockets[sock]
-                        print(f"honeypot: Closed listener on port {port} due to firewall conflict", flush=True)
+                        print(f"honeypot: Closed listener on port {port} due to {reason}", flush=True)
 
             except Exception as e:
                 print(f"honeypot: Error in firewall monitor: {e}", flush=True)
@@ -172,17 +186,19 @@ class HoneypotListener:
             print("honeypot: No valid ports configured", flush=True)
             return
 
-        # Check for firewall conflicts
+        # Check for firewall conflicts and ports already in use
         allowed_ports = self.get_firewall_allowed_ports()
         safe_ports = []
         for port in ports:
             if port in allowed_ports:
                 print(f"honeypot: WARNING - Port {port} has a firewall ALLOW rule, skipping (may conflict with legitimate service)", flush=True)
+            elif self.is_port_in_use(port):
+                print(f"honeypot: WARNING - Port {port} is already in use by another service, skipping", flush=True)
             else:
                 safe_ports.append(port)
 
         if not safe_ports:
-            print("honeypot: No ports available (all have firewall conflicts)", flush=True)
+            print("honeypot: No ports available (all have conflicts or are in use)", flush=True)
             return
 
         print(f"honeypot: Opening ports: {safe_ports}", flush=True)

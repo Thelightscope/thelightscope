@@ -6,6 +6,7 @@ status.py - Returns LightScope status as JSON for API/widget
 import json
 import os
 import re
+import socket
 import configparser
 import subprocess
 
@@ -52,9 +53,83 @@ def get_firewall_allowed_ports():
     return allowed_ports
 
 
+def get_lightscope_pids():
+    """Get all lightscope-related PIDs (main daemon and child processes)."""
+    pids = set()
+    try:
+        # Get all processes matching lightscope_daemon
+        result = subprocess.run(
+            ["pgrep", "-f", "lightscope_daemon"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    try:
+                        pids.add(int(line.strip()))
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return pids
+
+
+def is_port_in_use_by_other(port, lightscope_pids=None):
+    """
+    Check if a port is in use by a service OTHER than lightscope.
+    Returns True if another service is using it, False if available or used by lightscope.
+    """
+    if lightscope_pids is None:
+        lightscope_pids = set()
+
+    try:
+        # Use sockstat to see what's listening on the port
+        result = subprocess.run(
+            ["sockstat", "-4", "-l", "-p", str(port)],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            # Skip header line, check remaining lines
+            for line in lines[1:]:
+                if line.strip():
+                    # sockstat output: USER COMMAND PID FD PROTO LOCAL FOREIGN
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        try:
+                            sock_pid = int(parts[2])
+                            # Check if this is one of our lightscope processes
+                            if sock_pid in lightscope_pids:
+                                return False  # It's our honeypot, not a conflict
+                        except ValueError:
+                            pass
+                    # Something else is using the port
+                    return True
+
+        # No one listening - port is available
+        return False
+
+    except Exception:
+        # Fall back to socket bind test
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_sock.settimeout(0.5)
+            test_sock.bind(("", port))
+            test_sock.close()
+            return False
+        except OSError:
+            return True
+
+
 def get_port_status(ports_string):
     """
-    Check status of honeypot ports against firewall rules.
+    Check status of honeypot ports against firewall rules and port usage.
     Returns dict with port status info.
     """
     port_status = {}
@@ -63,6 +138,7 @@ def get_port_status(ports_string):
         return port_status
 
     allowed_ports = get_firewall_allowed_ports()
+    lightscope_pids = get_lightscope_pids()
 
     for p in ports_string.split(','):
         p = p.strip()
@@ -72,8 +148,11 @@ def get_port_status(ports_string):
                 if port in allowed_ports:
                     # Port has a firewall ALLOW rule - potential conflict
                     port_status[port] = "firewall_conflict"
+                elif is_port_in_use_by_other(port, lightscope_pids):
+                    # Port is already in use by another service (not lightscope)
+                    port_status[port] = "in_use"
                 else:
-                    # Port is safe for honeypot
+                    # Port is safe for honeypot or already opened by lightscope
                     port_status[port] = "ok"
 
     return port_status
