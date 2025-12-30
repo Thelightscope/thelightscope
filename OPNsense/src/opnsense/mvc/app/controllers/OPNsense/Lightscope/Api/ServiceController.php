@@ -30,10 +30,21 @@
 namespace OPNsense\Lightscope\Api;
 
 use OPNsense\Base\ApiMutableServiceControllerBase;
+use OPNsense\Core\Backend;
 
 class ServiceController extends ApiMutableServiceControllerBase
 {
     protected static $internalServiceClass = '\OPNsense\Lightscope\Lightscope';
     protected static $internalServiceEnabled = 'general.enabled';
     protected static $internalServiceName = 'lightscope';
+
+    /**
+     * Override reconfigure to skip template generation (we don't use templates)
+     */
+    public function reconfigureAction()
+    {
+        $backend = new Backend();
+        $response = $backend->configdRun('lightscope reconfigure');
+        return array("status" => "ok", "response" => $response);
+    }
 }

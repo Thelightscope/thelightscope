@@ -12,6 +12,8 @@ import select
 import threading
 import time
 import sys
+import subprocess
+import re
 
 
 class HoneypotListener:
@@ -38,6 +40,7 @@ class HoneypotListener:
         self.telnet_port = int(config.get('honeypot_telnet_port', 12346))
 
         self.sockets = {}  # socket -> port mapping
+        self.sockets_lock = threading.Lock()
         self.running = False
 
         # Connection limiting
@@ -45,6 +48,9 @@ class HoneypotListener:
         self.connection_semaphore = threading.Semaphore(self.MAX_CONCURRENT_CONNECTIONS)
         self.active_connections = 0
         self.connection_lock = threading.Lock()
+
+        # Firewall monitoring
+        self.FIREWALL_CHECK_INTERVAL = 10  # seconds
 
     def parse_ports(self, ports_string):
         """Parse comma-separated port string into list of integers."""
@@ -59,6 +65,74 @@ class HoneypotListener:
                 if 1 <= port <= 65535:
                     ports.append(port)
         return ports
+
+    def get_firewall_allowed_ports(self):
+        """
+        Get list of ports that have PASS/ALLOW rules in the firewall.
+        These are ports where legitimate services may be running.
+        """
+        allowed_ports = set()
+
+        try:
+            result = subprocess.run(
+                ["pfctl", "-sr"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    # Look for pass rules with port specifications
+                    if line.startswith('pass') and 'proto tcp' in line:
+                        # Match patterns like "port = 22" or "port 22"
+                        port_match = re.search(r'port\s*[=]?\s*(\d+)', line)
+                        if port_match:
+                            allowed_ports.add(int(port_match.group(1)))
+
+                        # Match port lists in braces
+                        brace_match = re.search(r'port\s*[=]?\s*\{([^}]+)\}', line)
+                        if brace_match:
+                            ports_str = brace_match.group(1)
+                            for p in re.findall(r'\d+', ports_str):
+                                allowed_ports.add(int(p))
+        except Exception as e:
+            print(f"honeypot: Error checking firewall rules: {e}", flush=True)
+
+        return allowed_ports
+
+    def _firewall_monitor_thread(self):
+        """
+        Monitor firewall rules every FIREWALL_CHECK_INTERVAL seconds.
+        If a new ALLOW rule is detected for an active honeypot port, close that port.
+        """
+        print("honeypot: Started firewall monitor (checking every 10s)", flush=True)
+
+        while self.running:
+            time.sleep(self.FIREWALL_CHECK_INTERVAL)
+            if not self.running:
+                break
+
+            try:
+                allowed_ports = self.get_firewall_allowed_ports()
+
+                with self.sockets_lock:
+                    sockets_to_close = []
+                    for sock, port in list(self.sockets.items()):
+                        if port in allowed_ports:
+                            print(f"honeypot: WARNING - Firewall ALLOW rule detected for port {port}, closing honeypot on this port", flush=True)
+                            sockets_to_close.append((sock, port))
+
+                    for sock, port in sockets_to_close:
+                        try:
+                            sock.close()
+                        except:
+                            pass
+                        del self.sockets[sock]
+                        print(f"honeypot: Closed listener on port {port} due to firewall conflict", flush=True)
+
+            except Exception as e:
+                print(f"honeypot: Error in firewall monitor: {e}", flush=True)
 
     def open_port(self, port):
         """
@@ -98,12 +172,26 @@ class HoneypotListener:
             print("honeypot: No valid ports configured", flush=True)
             return
 
-        print(f"honeypot: Opening ports: {ports}", flush=True)
-
+        # Check for firewall conflicts
+        allowed_ports = self.get_firewall_allowed_ports()
+        safe_ports = []
         for port in ports:
+            if port in allowed_ports:
+                print(f"honeypot: WARNING - Port {port} has a firewall ALLOW rule, skipping (may conflict with legitimate service)", flush=True)
+            else:
+                safe_ports.append(port)
+
+        if not safe_ports:
+            print("honeypot: No ports available (all have firewall conflicts)", flush=True)
+            return
+
+        print(f"honeypot: Opening ports: {safe_ports}", flush=True)
+
+        for port in safe_ports:
             s, actual_port = self.open_port(port)
             if s and actual_port:
-                self.sockets[s] = actual_port
+                with self.sockets_lock:
+                    self.sockets[s] = actual_port
                 print(f"honeypot: Listening on port {actual_port}", flush=True)
 
         if not self.sockets:
@@ -111,31 +199,45 @@ class HoneypotListener:
             return
 
         self.running = True
+
+        # Start firewall monitor thread
+        monitor_thread = threading.Thread(target=self._firewall_monitor_thread, daemon=True)
+        monitor_thread.start()
+
         self._run_accept_loop()
 
     def stop(self):
         """Stop all honeypot listeners."""
         self.running = False
-        for s in list(self.sockets.keys()):
-            try:
-                s.close()
-            except:
-                pass
-        self.sockets.clear()
+        with self.sockets_lock:
+            for s in list(self.sockets.keys()):
+                try:
+                    s.close()
+                except:
+                    pass
+            self.sockets.clear()
         print("honeypot: Stopped all listeners", flush=True)
 
     def get_open_ports(self):
         """Return list of currently open honeypot ports."""
-        return list(self.sockets.values())
+        with self.sockets_lock:
+            return list(self.sockets.values())
 
     def _run_accept_loop(self):
         """Main accept loop for honeypot connections."""
         print("honeypot: Starting accept loop", flush=True)
 
-        while self.running and self.sockets:
+        while self.running:
+            with self.sockets_lock:
+                sock_list = list(self.sockets.keys())
+
+            if not sock_list:
+                time.sleep(1.0)
+                continue
+
             try:
                 # Wait for incoming connections
-                readable, _, _ = select.select(list(self.sockets.keys()), [], [], 1.0)
+                readable, _, _ = select.select(sock_list, [], [], 1.0)
 
                 for sock in readable:
                     try:
@@ -152,7 +254,11 @@ class HoneypotListener:
         """Handle an incoming connection on a honeypot port."""
         try:
             local_conn, addr = listen_sock.accept()
-            port = self.sockets[listen_sock]
+            with self.sockets_lock:
+                port = self.sockets.get(listen_sock)
+            if port is None:
+                local_conn.close()
+                return
             attacker_ip = addr[0]
             attacker_port = addr[1]
 

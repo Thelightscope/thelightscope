@@ -5,11 +5,79 @@ status.py - Returns LightScope status as JSON for API/widget
 
 import json
 import os
+import re
 import configparser
 import subprocess
 
 CONFIG_FILE = "/usr/local/etc/lightscope.conf"
 DASHBOARD_URL = "https://thelightscope.com/light_table"
+
+
+def get_firewall_allowed_ports():
+    """
+    Get list of ports that have PASS/ALLOW rules in the firewall.
+    These are ports where legitimate services may be running.
+    """
+    allowed_ports = set()
+
+    try:
+        # Get active pf rules
+        result = subprocess.run(
+            ["pfctl", "-sr"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                # Look for pass rules with port specifications
+                # Example: pass in on em0 proto tcp from any to any port = 22
+                if line.startswith('pass') and 'proto tcp' in line:
+                    # Extract port number(s)
+                    # Match patterns like "port = 22" or "port 22" or "port { 22 80 443 }"
+                    port_match = re.search(r'port\s*[=]?\s*(\d+)', line)
+                    if port_match:
+                        allowed_ports.add(int(port_match.group(1)))
+
+                    # Match port ranges or lists in braces
+                    brace_match = re.search(r'port\s*[=]?\s*\{([^}]+)\}', line)
+                    if brace_match:
+                        ports_str = brace_match.group(1)
+                        for p in re.findall(r'\d+', ports_str):
+                            allowed_ports.add(int(p))
+    except Exception as e:
+        pass
+
+    return allowed_ports
+
+
+def get_port_status(ports_string):
+    """
+    Check status of honeypot ports against firewall rules.
+    Returns dict with port status info.
+    """
+    port_status = {}
+
+    if not ports_string:
+        return port_status
+
+    allowed_ports = get_firewall_allowed_ports()
+
+    for p in ports_string.split(','):
+        p = p.strip()
+        if p.isdigit():
+            port = int(p)
+            if 1 <= port <= 65535:
+                if port in allowed_ports:
+                    # Port has a firewall ALLOW rule - potential conflict
+                    port_status[port] = "firewall_conflict"
+                else:
+                    # Port is safe for honeypot
+                    port_status[port] = "ok"
+
+    return port_status
+
 
 def get_status():
     """Get LightScope status information."""
@@ -18,6 +86,7 @@ def get_status():
         "database": "",
         "dashboard_url": "",
         "honeypot_ports": "",
+        "port_status": {},
         "config_exists": False
     }
 
@@ -65,6 +134,9 @@ def get_status():
         result["process_count"] = len([p for p in pids if p])
     except Exception:
         result["process_count"] = 0
+
+    # Check port status against firewall rules
+    result["port_status"] = get_port_status(result["honeypot_ports"])
 
     return result
 

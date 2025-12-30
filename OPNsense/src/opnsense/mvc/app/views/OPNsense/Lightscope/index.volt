@@ -62,6 +62,24 @@
                         $('#database_id').text(data.database);
                         $('#database_container').show();
                     }
+                    // Update port status
+                    if (data.port_status && Object.keys(data.port_status).length > 0) {
+                        var portHtml = '';
+                        for (var port in data.port_status) {
+                            var pstatus = data.port_status[port];
+                            var badge = '';
+                            if (pstatus === 'ok') {
+                                badge = '<span class="label label-success"><i class="fa fa-check"></i> ' + port + '</span> ';
+                            } else if (pstatus === 'firewall_conflict') {
+                                badge = '<span class="label label-danger"><i class="fa fa-exclamation-triangle"></i> ' + port + ' (has allow rule)</span> ';
+                            }
+                            portHtml += badge;
+                        }
+                        $('#port_status').html(portHtml);
+                        $('#port_status_container').show();
+                    } else {
+                        $('#port_status_container').hide();
+                    }
                 }
             });
         }
@@ -150,6 +168,10 @@
                         <tr id="database_container" style="display: none;">
                             <td><strong>{{ lang._('Database ID') }}</strong></td>
                             <td><code id="database_id">-</code></td>
+                        </tr>
+                        <tr id="port_status_container" style="display: none;">
+                            <td><strong>{{ lang._('Honeypot Ports') }}</strong></td>
+                            <td id="port_status">-</td>
                         </tr>
                     </tbody>
                 </table>

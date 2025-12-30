@@ -9,9 +9,17 @@
 CONFIG_FILE="/usr/local/etc/lightscope.conf"
 
 # Update honeypot_ports from OPNsense model (preserves database ID)
+# Note: pluginctl returns empty string if not set, which is valid (no honeypot ports)
 HONEYPOT_PORTS=$(/usr/local/sbin/pluginctl -g OPNsense.Lightscope.general.honeypot_ports 2>/dev/null)
-if [ -n "$HONEYPOT_PORTS" ] && [ -f "$CONFIG_FILE" ]; then
-    sed -i '' "s/^honeypot_ports.*/honeypot_ports = $HONEYPOT_PORTS/" "$CONFIG_FILE"
+if [ -f "$CONFIG_FILE" ]; then
+    # Check if line exists
+    if grep -q "^honeypot_ports" "$CONFIG_FILE"; then
+        sed -i '' "s/^honeypot_ports.*/honeypot_ports = $HONEYPOT_PORTS/" "$CONFIG_FILE"
+    else
+        # Add the line if it doesn't exist
+        echo "honeypot_ports = $HONEYPOT_PORTS" >> "$CONFIG_FILE"
+    fi
+    echo "Updated honeypot_ports to: $HONEYPOT_PORTS"
 fi
 
 # Reload firewall rules (for honeypot ports)

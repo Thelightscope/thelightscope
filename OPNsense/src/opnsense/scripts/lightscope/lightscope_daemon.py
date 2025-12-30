@@ -113,6 +113,8 @@ class LightScopeConfig:
         self.honeypot_ssh_port = config.getint('Settings', 'honeypot_ssh_port', fallback=self.honeypot_ssh_port)
         self.honeypot_telnet_port = config.getint('Settings', 'honeypot_telnet_port', fallback=self.honeypot_telnet_port)
 
+        print(f"Loaded honeypot_ports from config: '{self.honeypot_ports}'")
+
         # Save config
         try:
             with open(self.config_file, 'w') as f:
