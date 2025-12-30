@@ -55,8 +55,11 @@
                         $('#dashboard_link').attr('href', data.dashboard_url);
                         $('#dashboard_link').html('<i class="fa fa-external-link"></i> ' + data.dashboard_url);
                         $('#dashboard_container').show();
+                        $('#dashboard_button').attr('href', data.dashboard_url);
+                        $('#dashboard_button_container').show();
                     } else {
                         $('#dashboard_container').hide();
+                        $('#dashboard_button_container').hide();
                     }
                     if (data.database) {
                         $('#database_id').text(data.database);
@@ -180,14 +183,23 @@
             </div>
         </div>
 
+        <!-- Dashboard Button -->
+        <div id="dashboard_button_container" class="row" style="display: none; margin-top: 15px;">
+            <div class="col-md-12">
+                <a id="dashboard_button" href="#" target="_blank" class="btn btn-lg btn-success">
+                    <i class="fa fa-dashboard"></i> <strong>View LightScope Dashboard</strong>
+                </a>
+            </div>
+        </div>
+
         <hr/>
 
         <!-- Settings Form -->
         {{ partial("layout_partials/base_form", ['fields': settings, 'id': 'frm_GeneralSettings']) }}
 
-        <div class="alert alert-info" style="margin-top: 15px;">
-            <i class="fa fa-info-circle"></i>
-            <strong>Note:</strong> Enable logging on your explicit block/reject firewall rules for LightScope to see that traffic.
+        <div class="alert alert-warning" style="margin-top: 15px;">
+            <i class="fa fa-exclamation-triangle"></i>
+            <strong>Important:</strong> Make sure logging is enabled on your firewall block/reject rules or LightScope can't see that traffic! LightScope works by examining your firewall logs for dropped/rejected traffic as they are created. Logging accepted traffic is not required, as LightScope will ignore anything accepted anyway. You don't need to retain logs or can use small log sizes, but logging must be enabled on your explicit drop/reject rules.
         </div>
 
         <hr/>

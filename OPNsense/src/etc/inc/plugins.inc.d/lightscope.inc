@@ -59,15 +59,10 @@ function lightscope_syslog()
     return $logfacilities;
 }
 
-function lightscope_firewall($fw)
+function lightscope_firewall(\OPNsense\Firewall\Plugin $fw)
 {
-    if (!lightscope_enabled()) {
-        return;
-    }
-
-    $model = new \OPNsense\Lightscope\Lightscope();
-
-    // Add block+log rule - catches blocked TCP for LightScope visibility
+    // Always add block+log rule when plugin is installed - no config dependency
+    // This ensures pflog captures blocked TCP traffic for LightScope visibility
     // Uses very high priority to run last, catching traffic that falls through
     $fw->registerFilterRule(
         999999,  // highest priority - run as late as possible
@@ -84,41 +79,53 @@ function lightscope_firewall($fw)
         null
     );
 
-    $honeypot_ports = (string)$model->general->honeypot_ports;
+    // Honeypot rules depend on config - wrap in try/catch for resilience
+    try {
+        $model = new \OPNsense\Lightscope\Lightscope();
 
-    if (empty($honeypot_ports)) {
-        return;
-    }
-
-    // Parse comma-separated ports
-    $ports = array_map('trim', explode(',', $honeypot_ports));
-    $valid_ports = array();
-
-    foreach ($ports as $port) {
-        if (is_numeric($port) && $port >= 1 && $port <= 65535) {
-            $valid_ports[] = $port;
+        if ((string)$model->general->enabled != '1') {
+            return;
         }
-    }
 
-    if (empty($valid_ports)) {
-        return;
-    }
+        $honeypot_ports = (string)$model->general->honeypot_ports;
 
-    // Create firewall rule to allow honeypot traffic
-    $fw->registerFilterRule(
-        100000,  // priority - run late so other rules take precedence
-        array(
-            'from' => 'any',
-            'to' => '(self)',
-            'direction' => 'in',
-            'protocol' => 'tcp',
-            'to_port' => implode(' ', $valid_ports),
-            'descr' => 'LightScope honeypot ports',
-            'log' => true,
-            '#ref' => 'lightscope_honeypot'
-        ),
-        null
-    );
+        if (empty($honeypot_ports)) {
+            return;
+        }
+
+        // Parse comma-separated ports
+        $ports = array_map('trim', explode(',', $honeypot_ports));
+        $valid_ports = array();
+
+        foreach ($ports as $port) {
+            if (is_numeric($port) && $port >= 1 && $port <= 65535) {
+                $valid_ports[] = $port;
+            }
+        }
+
+        if (empty($valid_ports)) {
+            return;
+        }
+
+        // Create firewall rule to allow honeypot traffic
+        $fw->registerFilterRule(
+            100000,  // priority - run late so other rules take precedence
+            array(
+                'from' => 'any',
+                'to' => '(self)',
+                'direction' => 'in',
+                'protocol' => 'tcp',
+                'to_port' => implode(' ', $valid_ports),
+                'descr' => 'LightScope honeypot ports',
+                'log' => true,
+                '#ref' => 'lightscope_honeypot'
+            ),
+            null
+        );
+    } catch (Exception $e) {
+        // Model loading failed - log rule is still added, honeypot rules skipped
+        // This ensures basic functionality even if config is broken
+    }
 }
 
 function lightscope_xmlrpc_sync()
