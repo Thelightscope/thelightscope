@@ -22,6 +22,23 @@ if [ -f "$CONFIG_FILE" ]; then
     echo "Updated honeypot_ports to: $HONEYPOT_PORTS"
 fi
 
+# Update auto_update_enabled from OPNsense model
+AUTO_UPDATE=$(/usr/local/sbin/pluginctl -g OPNsense.Lightscope.general.auto_update_enabled 2>/dev/null)
+# Convert 1/0 to true/false for config file
+if [ "$AUTO_UPDATE" = "1" ]; then
+    AUTO_UPDATE_VAL="true"
+else
+    AUTO_UPDATE_VAL="false"
+fi
+if [ -f "$CONFIG_FILE" ]; then
+    if grep -q "^auto_update_enabled" "$CONFIG_FILE"; then
+        sed -i '' "s/^auto_update_enabled.*/auto_update_enabled = $AUTO_UPDATE_VAL/" "$CONFIG_FILE"
+    else
+        echo "auto_update_enabled = $AUTO_UPDATE_VAL" >> "$CONFIG_FILE"
+    fi
+    echo "Updated auto_update_enabled to: $AUTO_UPDATE_VAL"
+fi
+
 # Reload firewall rules (for honeypot ports)
 /usr/local/etc/rc.filter_configure
 

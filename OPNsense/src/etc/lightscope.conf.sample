@@ -25,3 +25,9 @@ honeypot_ssh_port = 12345
 
 # TELNET connections (odd local ports) forward to this port
 honeypot_telnet_port = 12346
+
+# Automatic updates
+# Enable automatic plugin updates (recommended)
+# Updates are checked every 15 minutes and installed automatically
+# Set to false to disable (not recommended)
+auto_update_enabled = true

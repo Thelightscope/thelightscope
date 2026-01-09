@@ -30,6 +30,7 @@ sys.path.insert(0, script_dir)
 from pflog_reader import read_pflog
 from honeypot import run_honeypot
 from uploader import send_data, send_honeypot_data
+from auto_updater import run_update_loop
 
 try:
     import requests
@@ -43,7 +44,7 @@ except ImportError:
     psutil = None
 
 # Version
-LS_VERSION = "opnsense-1.0"
+LS_VERSION = "opnsense-1.1"
 
 # Configuration paths
 CONFIG_FILE = "/usr/local/etc/lightscope.conf"
@@ -61,6 +62,7 @@ class LightScopeConfig:
         self.honeypot_server = "128.9.28.79"
         self.honeypot_ssh_port = 12345
         self.honeypot_telnet_port = 12346
+        self.auto_update_enabled = True
 
         self._load_or_create_config()
 
@@ -113,6 +115,10 @@ class LightScopeConfig:
         self.honeypot_ssh_port = config.getint('Settings', 'honeypot_ssh_port', fallback=self.honeypot_ssh_port)
         self.honeypot_telnet_port = config.getint('Settings', 'honeypot_telnet_port', fallback=self.honeypot_telnet_port)
 
+        # Load auto-update setting
+        auto_update_str = config.get('Settings', 'auto_update_enabled', fallback='true')
+        self.auto_update_enabled = auto_update_str.lower() in ('true', '1', 'yes')
+
         print(f"Loaded honeypot_ports from config: '{self.honeypot_ports}'")
 
         # Save config
@@ -133,7 +139,8 @@ class LightScopeConfig:
             'honeypot_ports': self.honeypot_ports,
             'honeypot_server': self.honeypot_server,
             'honeypot_ssh_port': self.honeypot_ssh_port,
-            'honeypot_telnet_port': self.honeypot_telnet_port
+            'honeypot_telnet_port': self.honeypot_telnet_port,
+            'auto_update_enabled': self.auto_update_enabled
         }
 
 
@@ -454,6 +461,19 @@ def main():
         print("Started honeypot listener", flush=True)
     else:
         print("Honeypot disabled (no ports configured)", flush=True)
+
+    # 6. Auto-updater
+    if config_dict.get('auto_update_enabled', True):
+        p_updater = multiprocessing.Process(
+            target=run_update_loop,
+            args=(config_dict,),
+            name="auto_updater"
+        )
+        p_updater.start()
+        processes.append(p_updater)
+        print("Started auto-updater", flush=True)
+    else:
+        print("Auto-update disabled", flush=True)
 
     # Signal handler for clean shutdown
     def shutdown(signum, frame):

@@ -37,6 +37,10 @@
                 <MinimumValue>1</MinimumValue>
                 <MaximumValue>65535</MaximumValue>
             </honeypot_telnet_port>
+            <auto_update_enabled type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </auto_update_enabled>
         </general>
     </items>
 </model>

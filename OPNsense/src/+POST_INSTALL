@@ -5,6 +5,10 @@ chmod +x /usr/local/opnsense/scripts/lightscope/*.py 2>/dev/null
 chmod +x /usr/local/opnsense/scripts/lightscope/*.sh 2>/dev/null
 chmod +x /usr/local/etc/rc.d/os-lightscope 2>/dev/null
 
+# Ensure GPG key directory exists with proper permissions
+mkdir -p /usr/local/share/lightscope 2>/dev/null
+chmod 755 /usr/local/share/lightscope 2>/dev/null
+
 # Install Python dependencies via pip if not already present
 if ! /usr/local/bin/python3.11 -c "import dpkt" 2>/dev/null; then
     echo "Installing LightScope Python dependencies..."

@@ -1,0 +1,21 @@
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+Comment: PLACEHOLDER - Replace with actual GPG public key
+
+This is a placeholder file. Before releasing, generate a GPG key pair and replace
+this file with the actual public key:
+
+1. Generate key (on your signing machine):
+   gpg --full-generate-key
+   # Choose RSA 4096-bit
+   # Name: LightScope Release Signing Key
+   # Email: releases@thelightscope.com
+
+2. Export public key:
+   gpg --armor --export releases@thelightscope.com > lightscope-release.pub
+
+3. Sign packages:
+   gpg --detach-sign --armor -o os-lightscope-X.X.pkg.sig os-lightscope-X.X.pkg
+
+4. Host both the .pkg and .pkg.sig files on thelightscope.com/opnsense/pkg/
+
+-----END PGP PUBLIC KEY BLOCK-----

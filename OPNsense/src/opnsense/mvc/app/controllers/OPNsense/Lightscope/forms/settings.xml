@@ -11,4 +11,10 @@
         <type>text</type>
         <help>Comma-separated list of TCP ports to forward to the USC honeypot for analysis. You can view your honeypot data on the Full Dashboard. Example input: 8080,2323,8443,3389,5900</help>
     </field>
+    <field>
+        <id>lightscope.general.auto_update_enabled</id>
+        <label>Automatic Updates</label>
+        <type>checkbox</type>
+        <help>Enable automatic plugin updates (recommended). Updates are checked every 15 minutes and installed automatically when available. Disabling this is not recommended as you may miss important security updates.</help>
+    </field>
 </form>
