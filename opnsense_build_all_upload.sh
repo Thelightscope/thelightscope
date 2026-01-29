@@ -4,6 +4,11 @@ set -e
 # Add common paths
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
 
+# Add Homebrew to PATH on macOS
+if [[ "$OSTYPE" == "darwin"* ]] && [[ -f "/opt/homebrew/bin/brew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -13,7 +18,7 @@ NC='\033[0m' # No Color
 echo "=== LightScope OPNsense Package Build & Deploy ==="
 echo ""
 echo "Requirements:"
-echo "  - GPG for signing packages"
+echo "  - Python3 with cryptography module for signing packages"
 echo "  - FreeBSD/OPNsense system for building .pkg (or pre-built package)"
 echo ""
 
@@ -23,8 +28,8 @@ UPLOAD_DIR="opnsense_upload"
 SERVER_USER="kapitans"
 SERVER_HOST="lightscope.isi.edu"
 SERVER_PATH="/var/www/lightscope/opnsense"
-GPG_KEY_EMAIL="releases@thelightscope.com"
-GPG_KEY_NAME="LightScope Release Signing Key"
+PRIVATE_KEY="lightscope-private.pem"
+PUBLIC_KEY="lightscope-public.pem"
 
 # Clean up previous build artifacts
 echo "Cleaning up previous build artifacts..."
@@ -48,64 +53,35 @@ fi
 echo -e "${GREEN}Building LightScope OPNsense v$VERSION${NC}"
 
 echo ""
-echo "=== Step 1: GPG Key Setup ==="
+echo "=== Step 1: Code Signing Keys Setup ==="
 
-# Check if GPG is available
-if ! command -v gpg &> /dev/null; then
-    echo -e "${RED}Error: GPG not found. Please install:${NC}"
-    echo "  macOS: brew install gnupg"
-    echo "  Linux: apt/dnf/yum install gnupg"
-    exit 1
+# Check if cryptography is installed
+if ! python3 -c "import cryptography" 2>/dev/null; then
+    echo "Installing cryptography for signing..."
+    pip3 install cryptography
 fi
 
-# Check for existing GPG key
-GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_EMAIL" 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
-
-if [ -z "$GPG_KEY_ID" ]; then
-    echo "No GPG signing key found for $GPG_KEY_EMAIL"
-    echo ""
-    echo "Would you like to generate a new GPG key? (y/n)"
-    read -r GENERATE_KEY
-
-    if [ "$GENERATE_KEY" = "y" ] || [ "$GENERATE_KEY" = "Y" ]; then
-        echo "Generating new GPG key..."
-
-        # Create batch file for unattended key generation
-        cat > /tmp/gpg_batch << EOF
-%echo Generating LightScope Release Signing Key
-Key-Type: RSA
-Key-Length: 4096
-Subkey-Type: RSA
-Subkey-Length: 4096
-Name-Real: $GPG_KEY_NAME
-Name-Email: $GPG_KEY_EMAIL
-Expire-Date: 0
-%no-protection
-%commit
-%echo Done
-EOF
-        gpg --batch --gen-key /tmp/gpg_batch
-        rm /tmp/gpg_batch
-
-        # Get the new key ID
-        GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG "$GPG_KEY_EMAIL" 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
-        echo -e "${GREEN}Generated new GPG key: $GPG_KEY_ID${NC}"
-    else
-        echo -e "${RED}Cannot proceed without GPG signing key${NC}"
-        exit 1
-    fi
+# Check for existing key pair
+if [ ! -f "$PRIVATE_KEY" ] || [ ! -f "$PUBLIC_KEY" ]; then
+    echo "No signing key pair found."
+    echo "Generating new RSA key pair..."
+    python3 sign-and-upload.py --generate-keys
+    echo -e "${GREEN}Generated new RSA key pair${NC}"
 else
-    echo -e "${GREEN}Using existing GPG key: $GPG_KEY_ID${NC}"
+    echo -e "${GREEN}Using existing key pair:${NC}"
+    echo "  - $PRIVATE_KEY"
+    echo "  - $PUBLIC_KEY"
 fi
 
-# Export public key
-echo "Exporting public key..."
+# Copy public key to upload directory
+echo "Copying public key..."
 mkdir -p "$UPLOAD_DIR/keys"
-gpg --armor --export "$GPG_KEY_EMAIL" > "$UPLOAD_DIR/keys/lightscope-release.pub"
-echo "Public key exported to: $UPLOAD_DIR/keys/lightscope-release.pub"
+cp "$PUBLIC_KEY" "$UPLOAD_DIR/keys/lightscope-public.pem"
+echo "Public key copied to: $UPLOAD_DIR/keys/lightscope-public.pem"
 
 # Also update the embedded public key in the source
-cp "$UPLOAD_DIR/keys/lightscope-release.pub" "$OPNSENSE_DIR/src/share/lightscope/lightscope-release.pub"
+mkdir -p "$OPNSENSE_DIR/src/share/lightscope"
+cp "$PUBLIC_KEY" "$OPNSENSE_DIR/src/share/lightscope/lightscope-public.pem"
 echo "Updated embedded public key in source"
 
 echo ""
@@ -189,9 +165,38 @@ if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
     # Copy package to upload directory
     cp "$PKG_FILE" "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg"
 
-    # Sign the package
-    echo "Signing package with GPG..."
-    gpg --detach-sign --armor -u "$GPG_KEY_EMAIL" -o "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg.sig" "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg"
+    # Sign the package using Python/cryptography (same as dpkg)
+    echo "Signing package with RSA key..."
+    python3 << SIGN_EOF
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+import hashlib
+
+# Load private key
+with open("$PRIVATE_KEY", 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+# Read the package file
+with open("$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg", 'rb') as f:
+    file_data = f.read()
+
+# Create signature
+signature = private_key.sign(
+    file_data,
+    padding.PSS(
+        mgf=padding.MGF1(hashes.SHA256()),
+        salt_length=padding.PSS.MAX_LENGTH
+    ),
+    hashes.SHA256()
+)
+
+# Save signature
+with open("$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg.sig", 'wb') as f:
+    f.write(signature)
+
+print(f"Signed package: $UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg")
+print(f"Signature size: {len(signature)} bytes")
+SIGN_EOF
 
     # Calculate SHA256
     if command -v sha256sum &> /dev/null; then
@@ -223,6 +228,7 @@ cat > "$UPLOAD_DIR/version.json" << EOF
     "release_date": "$RELEASE_DATE",
     "package_url": "https://thelightscope.com/opnsense/pkg/os-lightscope-${VERSION}.pkg",
     "signature_url": "https://thelightscope.com/opnsense/pkg/os-lightscope-${VERSION}.pkg.sig",
+    "public_key_url": "https://thelightscope.com/opnsense/keys/lightscope-public.pem",
     "sha256": "$SHA256",
     "changelog": "LightScope OPNsense Plugin v$VERSION",
     "requires_restart": true,
@@ -238,8 +244,49 @@ echo ""
 echo "=== Step 5: Verify Signature ==="
 
 if [ -f "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg" ]; then
-    echo "Verifying GPG signature..."
-    if gpg --verify "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg.sig" "$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg"; then
+    echo "Verifying RSA signature..."
+    python3 << VERIFY_EOF
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.exceptions import InvalidSignature
+import sys
+
+try:
+    # Load public key
+    with open("$PUBLIC_KEY", 'rb') as f:
+        public_key = serialization.load_pem_public_key(f.read())
+
+    # Read the package file
+    with open("$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg", 'rb') as f:
+        file_data = f.read()
+
+    # Read the signature
+    with open("$UPLOAD_DIR/pkg/os-lightscope-${VERSION}.pkg.sig", 'rb') as f:
+        signature = f.read()
+
+    # Verify signature
+    public_key.verify(
+        signature,
+        file_data,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+
+    print("Signature verification successful!")
+    sys.exit(0)
+
+except InvalidSignature:
+    print("Signature verification FAILED: Invalid signature")
+    sys.exit(1)
+except Exception as e:
+    print(f"Signature verification FAILED: {e}")
+    sys.exit(1)
+VERIFY_EOF
+
+    if [ $? -eq 0 ]; then
         echo -e "${GREEN}Signature verification successful!${NC}"
     else
         echo -e "${RED}Signature verification FAILED!${NC}"
@@ -366,13 +413,13 @@ echo -e "${GREEN}=== DEPLOYMENT COMPLETE ===${NC}"
 echo ""
 echo "Test the deployment:"
 echo "  curl https://thelightscope.com/opnsense/version.json"
-echo "  curl https://thelightscope.com/opnsense/keys/lightscope-release.pub"
+echo "  curl https://thelightscope.com/opnsense/keys/lightscope-public.pem"
 if [ -n "$PKG_FILE" ]; then
     echo "  curl -I https://thelightscope.com/opnsense/pkg/os-lightscope-${VERSION}.pkg"
 fi
 echo ""
 echo "Server URLs:"
 echo "  Version manifest: https://thelightscope.com/opnsense/version.json"
-echo "  Public key:       https://thelightscope.com/opnsense/keys/lightscope-release.pub"
+echo "  Public key:       https://thelightscope.com/opnsense/keys/lightscope-public.pem"
 echo "  Package:          https://thelightscope.com/opnsense/pkg/os-lightscope-${VERSION}.pkg"
 echo "  Signature:        https://thelightscope.com/opnsense/pkg/os-lightscope-${VERSION}.pkg.sig"

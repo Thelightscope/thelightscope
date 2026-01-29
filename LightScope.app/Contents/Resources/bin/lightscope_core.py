@@ -2853,9 +2853,9 @@ class configuration_reader:
 
         # Check for the 'autoupdate' option.
         if 'autoupdate' not in config['Settings'] or not config['Settings']['autoupdate'].strip():
-            autoupdate="no"
+            autoupdate="yes"
             config['Settings']['autoupdate'] = autoupdate
-            print(f"autoupdate not found; : {autoupdate}")
+            print(f"autoupdate not found; set to: {autoupdate}")
 
 
         # Optionally, you can also add the comment as a separate step manually 
