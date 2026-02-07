@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.4.8"
+ls_version = "1.4.9"
 
 print(f"ls_version: {ls_version}")
 
@@ -1442,7 +1442,7 @@ def send_honeypot_data(consumer_upload_conn):
         t.join()
 
 
-def send_data(consumer_upload_conn):
+def send_data(consumer_upload_conn, shared_honeypot_config=None):
     DATA_URL      = "https://thelightscope.com/log_mysql_data"
     HEARTBEAT_URL = "https://thelightscope.com/heartbeat"
     HEADERS       = {
@@ -1500,11 +1500,60 @@ def send_data(consumer_upload_conn):
                             json=item,
                             headers=HEADERS,
                             timeout=10,
-                            
+
                         )
                         if resp.status_code != 200:
                             print(f"[heartbeat] rejected ({resp.status_code}): {resp.text}", flush=True)
-                            pass
+                        else:
+                            # Try to parse honeypot config from response with robust error handling
+                            if shared_honeypot_config is not None:
+                                try:
+                                    response_data = resp.json()
+                                    if isinstance(response_data, dict) and 'honeypot_config' in response_data:
+                                        hp_config = response_data['honeypot_config']
+
+                                        # Validate that honeypot_config is a dict
+                                        if not isinstance(hp_config, dict):
+                                            print(f"[heartbeat] Invalid honeypot_config type: {type(hp_config)}, expected dict", flush=True)
+                                        else:
+                                            # Validate and update each field with type checking
+                                            updated = False
+
+                                            # Validate remote_host (string, non-empty)
+                                            if 'remote_host' in hp_config:
+                                                remote_host = hp_config['remote_host']
+                                                if isinstance(remote_host, str) and remote_host.strip():
+                                                    shared_honeypot_config['remote_host'] = remote_host.strip()
+                                                    updated = True
+                                                else:
+                                                    print(f"[heartbeat] Invalid remote_host: {remote_host}", flush=True)
+
+                                            # Validate ssh_port (integer, 1-65535)
+                                            if 'ssh_port' in hp_config:
+                                                ssh_port = hp_config['ssh_port']
+                                                if isinstance(ssh_port, int) and 1 <= ssh_port <= 65535:
+                                                    shared_honeypot_config['ssh_port'] = ssh_port
+                                                    updated = True
+                                                else:
+                                                    print(f"[heartbeat] Invalid ssh_port: {ssh_port}, must be int 1-65535", flush=True)
+
+                                            # Validate telnet_port (integer, 1-65535)
+                                            if 'telnet_port' in hp_config:
+                                                telnet_port = hp_config['telnet_port']
+                                                if isinstance(telnet_port, int) and 1 <= telnet_port <= 65535:
+                                                    shared_honeypot_config['telnet_port'] = telnet_port
+                                                    updated = True
+                                                else:
+                                                    print(f"[heartbeat] Invalid telnet_port: {telnet_port}, must be int 1-65535", flush=True)
+
+                                            if updated:
+                                                print(f"[heartbeat] Updated honeypot config: host={shared_honeypot_config.get('remote_host')}, ssh={shared_honeypot_config.get('ssh_port')}, telnet={shared_honeypot_config.get('telnet_port')}", flush=True)
+
+                                except (ValueError, TypeError, KeyError) as e:
+                                    print(f"[heartbeat] Error parsing response JSON: {e}", flush=True)
+                                except Exception as e:
+                                    print(f"[heartbeat] Unexpected error updating honeypot config: {e}", flush=True)
+
                         resp.raise_for_status()
                     except requests.RequestException as e:
                         print(f"[heartbeat] error, will drop: {e}", flush=True)
@@ -2093,13 +2142,20 @@ def lightscope_run():
         import multiprocessing
         manager = multiprocessing.Manager()
         shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
-        
+
+        # Create shared dict for honeypot forwarding configuration with hardcoded defaults
+        shared_honeypot_config = manager.dict({
+            'remote_host': '128.9.28.79',
+            'ssh_port': 12345,
+            'telnet_port': 12346
+        })
+
         top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
         hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
 
         hp_proc = multiprocessing.Process(
             target=_honeypot_worker,
-            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info),
+            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
             daemon=True
         )
         hp_uploader = multiprocessing.Process(
@@ -2112,7 +2168,7 @@ def lightscope_run():
         # end honeypot
 
         # helper to spawn the three subprocesses for one interface
-        def spawn_for_interface_mac_linux(iface, internal_ips, top_unwanted_ports_producer, shared_open_honeypots):
+        def spawn_for_interface_mac_linux(iface, internal_ips, top_unwanted_ports_producer, shared_open_honeypots, shared_honeypot_config):
             # 1) make the two duplex pipes
             unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
             up_consumer, up_producer     = multiprocessing.Pipe(duplex=False)
@@ -2141,7 +2197,7 @@ def lightscope_run():
             )
             p_uploader = multiprocessing.Process(
                 target=send_data,
-                args=(up_consumer,),
+                args=(up_consumer, shared_honeypot_config),
                 name=f"uploader[{iface}]"
             )
 
@@ -2170,7 +2226,7 @@ def lightscope_run():
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_mac_linux(iface, ips,top_unwanted_ports_producer, shared_open_honeypots)
+            processes_per_interface[iface] = spawn_for_interface_mac_linux(iface, ips,top_unwanted_ports_producer, shared_open_honeypots, shared_honeypot_config)
 
         print("Live interfaces:", list(processes_per_interface))
 
@@ -2204,18 +2260,25 @@ def lightscope_run():
         system_info = get_system_info()
         external_network_information = fetch_light_scope_info()
 
-        # begin honeypot  
+        # begin honeypot
         # Create shared memory for honeypot ports (accessible by all processes)
         import multiprocessing
         manager = multiprocessing.Manager()
         shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
-        
+
+        # Create shared dict for honeypot forwarding configuration with hardcoded defaults
+        shared_honeypot_config = manager.dict({
+            'remote_host': '128.9.28.79',
+            'ssh_port': 12345,
+            'telnet_port': 12346
+        })
+
         top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
         hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
-        
+
         hp_proc = multiprocessing.Process(
             target=_honeypot_worker,
-            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info),
+            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
             daemon=True
         )
         hp_uploader = multiprocessing.Process(
@@ -2228,7 +2291,7 @@ def lightscope_run():
         # end honeypot
 
         # helper to spawn the three subprocesses for one interface
-        def spawn_for_interface_windows(iface, internal_ips):
+        def spawn_for_interface_windows(iface, internal_ips, shared_honeypot_config):
             # 1) make the two duplex pipes
             unproc_consumer, unproc_producer = multiprocessing.Pipe(duplex=True)
             up_consumer, up_producer     = multiprocessing.Pipe(duplex=False)
@@ -2257,7 +2320,7 @@ def lightscope_run():
             )
             p_uploader = multiprocessing.Process(
                 target=send_data,
-                args=(up_consumer,),
+                args=(up_consumer, shared_honeypot_config),
                 name=f"uploader[{iface}]"
             )
 
@@ -2286,7 +2349,7 @@ def lightscope_run():
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
-            processes_per_interface[iface] = spawn_for_interface_windows(iface, ips)
+            processes_per_interface[iface] = spawn_for_interface_windows(iface, ips, shared_honeypot_config)
 
         print("Live interfaces:", list(processes_per_interface))
 
@@ -2459,7 +2522,7 @@ class configuration_reader:
 
 
 # -- Honeypot worker using pipes with service emulation and input logging -------------------------
-def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info):
+def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config):
     try:
         import sys
         import traceback
@@ -2964,12 +3027,17 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
 
                                 # only proxy SSH and TELNET
                                 if svc in ('SSH', 'TELNET'):
-                                    remote_host = "128.9.28.79"
-                                    # map to your Docker host ports:
-                                    if svc == 'SSH':
-                                        connect_port = 12345    # host→container2222
-                                    else:  # TELNET
-                                        connect_port = 12346    # host→container2223
+                                    # Get honeypot config from shared dict with hardcoded fallbacks
+                                    try:
+                                        remote_host = shared_honeypot_config.get('remote_host', '128.9.28.79')
+                                        if svc == 'SSH':
+                                            connect_port = shared_honeypot_config.get('ssh_port', 12345)
+                                        else:  # TELNET
+                                            connect_port = shared_honeypot_config.get('telnet_port', 12346)
+                                    except Exception as e:
+                                        print(f"_honeypot_worker: Error reading shared config, using defaults: {e}", flush=True)
+                                        remote_host = "128.9.28.79"
+                                        connect_port = 12345 if svc == 'SSH' else 12346
 
                                     remote_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                     remote_conn.settimeout(30.0)
