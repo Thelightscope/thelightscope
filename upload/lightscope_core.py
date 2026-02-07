@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.4.9"
+ls_version = "1.5.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -56,8 +56,10 @@ elif verbose == 2:
 
 
 
-# Global memory management constant
-MAX_SIZE = 100000  # Maximum size for all deques, queues, and collections
+# Global memory management constants
+MAX_SIZE = 100000  # Maximum size for most deques, queues, and collections
+WORK_DEQUE_MAX_SIZE = 10000  # Limit for work_deque to prevent excessive memory usage
+                              # 10,000 batches × 280 packets × ~500 bytes = ~1.4 GB max
 
 # packet_info.py
 import dpkt
@@ -1236,10 +1238,10 @@ class Ports:
             
             
     def packet_handler(self, unprocessed_packets):
-        next_hb = time.monotonic()  
-        honeypot_open_ports_updates = time.monotonic()  
-        honeypot_send_top_ports = time.monotonic()  
-        work_deque  = deque(maxlen=MAX_SIZE)
+        next_hb = time.monotonic()
+        honeypot_open_ports_updates = time.monotonic()
+        honeypot_send_top_ports = time.monotonic()
+        work_deque  = deque(maxlen=WORK_DEQUE_MAX_SIZE)
         packets_processed=0
         prior_time=time.monotonic()
 
