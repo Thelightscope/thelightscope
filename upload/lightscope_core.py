@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.0"
+ls_version = "1.6.1"
 
 print(f"ls_version: {ls_version}")
 
@@ -1518,15 +1518,16 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                         if not isinstance(hp_config, dict):
                                             print(f"[heartbeat] Invalid honeypot_config type: {type(hp_config)}, expected dict", flush=True)
                                         else:
-                                            # Validate and update each field with type checking
-                                            updated = False
+                                            # Validate and update each field only if it actually changed
+                                            changed = False
 
                                             # Validate remote_host (string, non-empty)
                                             if 'remote_host' in hp_config:
                                                 remote_host = hp_config['remote_host']
                                                 if isinstance(remote_host, str) and remote_host.strip():
-                                                    shared_honeypot_config['remote_host'] = remote_host.strip()
-                                                    updated = True
+                                                    if remote_host.strip() != shared_honeypot_config.get('remote_host'):
+                                                        shared_honeypot_config['remote_host'] = remote_host.strip()
+                                                        changed = True
                                                 else:
                                                     print(f"[heartbeat] Invalid remote_host: {remote_host}", flush=True)
 
@@ -1534,8 +1535,9 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                             if 'ssh_port' in hp_config:
                                                 ssh_port = hp_config['ssh_port']
                                                 if isinstance(ssh_port, int) and 1 <= ssh_port <= 65535:
-                                                    shared_honeypot_config['ssh_port'] = ssh_port
-                                                    updated = True
+                                                    if ssh_port != shared_honeypot_config.get('ssh_port'):
+                                                        shared_honeypot_config['ssh_port'] = ssh_port
+                                                        changed = True
                                                 else:
                                                     print(f"[heartbeat] Invalid ssh_port: {ssh_port}, must be int 1-65535", flush=True)
 
@@ -1543,13 +1545,14 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                             if 'telnet_port' in hp_config:
                                                 telnet_port = hp_config['telnet_port']
                                                 if isinstance(telnet_port, int) and 1 <= telnet_port <= 65535:
-                                                    shared_honeypot_config['telnet_port'] = telnet_port
-                                                    updated = True
+                                                    if telnet_port != shared_honeypot_config.get('telnet_port'):
+                                                        shared_honeypot_config['telnet_port'] = telnet_port
+                                                        changed = True
                                                 else:
                                                     print(f"[heartbeat] Invalid telnet_port: {telnet_port}, must be int 1-65535", flush=True)
 
-                                            if updated:
-                                                print(f"[heartbeat] Updated honeypot config: host={shared_honeypot_config.get('remote_host')}, ssh={shared_honeypot_config.get('ssh_port')}, telnet={shared_honeypot_config.get('telnet_port')}", flush=True)
+                                            if changed:
+                                                print(f"[heartbeat] Honeypot config changed: host={shared_honeypot_config.get('remote_host')}, ssh={shared_honeypot_config.get('ssh_port')}, telnet={shared_honeypot_config.get('telnet_port')}", flush=True)
 
                                 except (ValueError, TypeError, KeyError) as e:
                                     print(f"[heartbeat] Error parsing response JSON: {e}", flush=True)
@@ -2533,11 +2536,11 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         sys.stdout.flush()
         sys.stderr.flush()
         
-        print(f"_honeypot_worker: Starting honeypot worker process", flush=True)
+        ###print(f"_honeypot_worker: Starting honeypot worker process", flush=True)
         
         sockets = {}  # socket -> port mapping
         service_map = {0:'HTTP',1:'SSH',2:'SMTP',3:'FTP',4:'TELNET',5:'POP3',6:'IMAP',7:'ECHO',8:'TIME',9:'DISCARD'}
-        print(f"_honeypot_worker: started", flush=True)
+        ###print(f"_honeypot_worker: started", flush=True)
         
         # Auto-rotation state
         next_rotation = time.time() + 4 * 60 * 60  # Start first rotation in 10 seconds for testing
@@ -2587,9 +2590,9 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             try:
                 current_ports = list(sockets.values())
                 shared_open_honeypots[:] = current_ports  # Replace all contents atomically
-                print(f"_honeypot_worker: Updated shared ports: {current_ports}", flush=True)
+                ###print(f"_honeypot_worker: Updated shared ports: {current_ports}", flush=True)
             except Exception as e:
-                print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
+                ###print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
         
         def try_bind_port(desired_port, max_attempts=10):
             """
@@ -2624,30 +2627,30 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                     s.listen()
                     
                     if port != desired_port:
-                        print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
+                        ###print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
                     
                     return s, port
                     
                 except OSError as e:
                     if e.errno == 98:  # EADDRINUSE - Address already in use
                         if attempt == 0:  # Only log for the first (desired) port
-                            print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
+                            ###print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
                         continue
                     elif e.errno == 13:  # EACCES - Permission denied  
                         if port < 1024:
-                            print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
+                            ###print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
                             continue
                         else:
-                            print(f"_honeypot_worker: Permission denied for port {port}: {e}", flush=True)
+                            ###print(f"_honeypot_worker: Permission denied for port {port}: {e}", flush=True)
                             continue
                     else:
-                        print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                        ###print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
                         continue
                 except Exception as e:
-                    print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
+                    ###print(f"_honeypot_worker: Unexpected error binding port {port}: {e}", flush=True)
                     continue
             
-            print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
+            ###print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
             return None, None
         
         # Detect NRP mode (database name starts with 'nrp')
@@ -2696,7 +2699,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 23456,  # Generic scan target
                 25565,  # Minecraft
             }
-            print(f"_honeypot_worker: NRP mode detected - using static port list ({len(priority_ports)} ports)", flush=True)
+            ###print(f"_honeypot_worker: NRP mode detected - using static port list ({len(priority_ports)} ports)", flush=True)
         else:
             # Standard mode: Use priority ports with dynamic rotation
             priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
@@ -2713,7 +2716,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             available_random = [p for p in range(1024, 65536) if p not in priority_ports]
             initial_ports.extend(random.sample(available_random, min(additional_needed, len(available_random))))
 
-        print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
+        ###print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
         
         # Try to open initial ports with retry logic
         for desired_port in initial_ports:
@@ -2721,12 +2724,12 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             if s and actual_port:
                 sockets[s] = actual_port
                 previously_opened_ports.add(actual_port)  # Track this port in history
-                print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
+                ###print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
             else:
-                print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
+                ###print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
         
         # Update shared memory with initial ports
-        print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
+        ###print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
         update_shared_honeypot_ports()
 
         def prepare_honeypot_connection_data(sport, service, ipsrc,dport):
@@ -2913,35 +2916,35 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
         def rotate_honeypots():
             """Auto-rotate to top 10 ports based on collected data"""
             try:
-                print(f"_honeypot_worker: Starting rotation. interface_port_counts has {len(interface_port_counts)} interfaces", flush=True)
+                ###print(f"_honeypot_worker: Starting rotation. interface_port_counts has {len(interface_port_counts)} interfaces", flush=True)
                 
                 # Aggregate port counts from all interfaces
                 aggregated_counts = {}
                 for interface_name, port_counts in interface_port_counts.items():
-                    print(f"_honeypot_worker: Interface {interface_name} has {len(port_counts)} port entries", flush=True)
+                    ###print(f"_honeypot_worker: Interface {interface_name} has {len(port_counts)} port entries", flush=True)
                     for port, count in port_counts.items():
                         aggregated_counts[port] = aggregated_counts.get(port, 0) + count
                 
-                print(f"_honeypot_worker: Total aggregated ports: {len(aggregated_counts)}", flush=True)
+                ###print(f"_honeypot_worker: Total aggregated ports: {len(aggregated_counts)}", flush=True)
                 if aggregated_counts:
-                    print(f"_honeypot_worker: Top 5 ports: {sorted(aggregated_counts.items(), key=lambda x: x[1], reverse=True)[:5]}", flush=True)
+                    ###print(f"_honeypot_worker: Top 5 ports: {sorted(aggregated_counts.items(), key=lambda x: x[1], reverse=True)[:5]}", flush=True)
                 
                 # Get top ports > 1023, filter out system ports and previously opened ports
                 valid_ports = {p: c for p, c in aggregated_counts.items() if p > 1023}
-                print(f"_honeypot_worker: Valid ports (>1023): {len(valid_ports)}", flush=True)
+                ###print(f"_honeypot_worker: Valid ports (>1023): {len(valid_ports)}", flush=True)
                 
                 # Filter out previously opened ports from top targets
                 available_ports = {p: c for p, c in valid_ports.items() if p not in previously_opened_ports}
                 if len(available_ports) < len(valid_ports):
                     filtered_count = len(valid_ports) - len(available_ports)
-                    print(f"_honeypot_worker: Filtered out {filtered_count} previously opened ports from traffic analysis", flush=True)
+                    ###print(f"_honeypot_worker: Filtered out {filtered_count} previously opened ports from traffic analysis", flush=True)
                 
                 # Use available ports if we have enough, otherwise fall back to all valid ports
                 ports_to_use = available_ports if len(available_ports) >= 5 else valid_ports
                 top_ports = sorted(ports_to_use.items(), key=lambda x: x[1], reverse=True)[:10]
                 target_ports = [p for p, _ in top_ports]
                 
-                print(f"_honeypot_worker: Target ports from traffic: {target_ports}", flush=True)
+                ###print(f"_honeypot_worker: Target ports from traffic: {target_ports}", flush=True)
                 
                 # If first run or insufficient data, fill with priority ports first, then random
                 if len(target_ports) < 10:
@@ -2966,24 +2969,24 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                         if len(available_random) >= still_needed:
                             random_ports = random.sample(available_random, still_needed)
                             target_ports.extend(random_ports)
-                            print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports and {len(random_ports)} random ports: priority={priority_to_add}, random={random_ports}", flush=True)
+                            ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports and {len(random_ports)} random ports: priority={priority_to_add}, random={random_ports}", flush=True)
                         else:
                             # If we can't avoid all previously opened ports, use what we can
                             all_available = [p for p in range(1024, 65536) if p not in all_existing]
                             random_ports = random.sample(all_available, min(still_needed, len(all_available)))
                             target_ports.extend(random_ports)
-                            print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports and {len(random_ports)} random ports (some may be reused): priority={priority_to_add}, random={random_ports}", flush=True)
+                            ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports and {len(random_ports)} random ports (some may be reused): priority={priority_to_add}, random={random_ports}", flush=True)
                     else:
-                        print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports: {priority_to_add}", flush=True)   
+                        ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports: {priority_to_add}", flush=True)   
                 
                 current_ports = set(sockets.values())
                 to_open = set(target_ports) - current_ports
                 to_close = current_ports - set(target_ports)
                 
-                print(f"_honeypot_worker: Current ports: {current_ports}", flush=True)
-                print(f"_honeypot_worker: Target ports: {set(target_ports)}", flush=True)
-                print(f"_honeypot_worker: Ports to open: {to_open}", flush=True)
-                print(f"_honeypot_worker: Ports to close: {to_close}", flush=True)
+                ###print(f"_honeypot_worker: Current ports: {current_ports}", flush=True)
+                ###print(f"_honeypot_worker: Target ports: {set(target_ports)}", flush=True)
+                ###print(f"_honeypot_worker: Ports to open: {to_open}", flush=True)
+                ###print(f"_honeypot_worker: Ports to close: {to_close}", flush=True)
                 
                 # Close old ports
                 for port in to_close:
@@ -2991,7 +2994,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                         if p == port:
                             try: s.close(); del sockets[s]
                             except: pass
-                            print(f"_honeypot_worker: Closed port {port}", flush=True)
+                            ###print(f"_honeypot_worker: Closed port {port}", flush=True)
                 
                 # Open new ports with retry logic
                 for desired_port in to_open:
@@ -2999,18 +3002,18 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                     if s and actual_port:
                         sockets[s] = actual_port
                         previously_opened_ports.add(actual_port)  # Track this port in history
-                        print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
+                        ###print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
                     else:
-                        print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
+                        ###print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
 
                 update_shared_honeypot_ports()
                 interface_port_counts.clear()  # Reset for next cycle
-                print(f"_honeypot_worker: Rotation complete. Active sockets: {len(sockets)}", flush=True)
+                ###print(f"_honeypot_worker: Rotation complete. Active sockets: {len(sockets)}", flush=True)
             except Exception as e:
-                print(f"_honeypot_worker: Error in rotate_honeypots: {e}", flush=True)
+                ###print(f"_honeypot_worker: Error in rotate_honeypots: {e}", flush=True)
                 traceback.print_exc()
 
-        print(f"_honeypot_worker: Starting main loop", flush=True)
+        ###print(f"_honeypot_worker: Starting main loop", flush=True)
         
         while True:
             try:
@@ -3019,7 +3022,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 
                 # Debug: print every 1000 loops to show we're running
                 if loop_count % 1000 == 0:
-                    print(f"_honeypot_worker: Loop {loop_count}, now={now:.1f}, next_rotation={next_rotation:.1f}, diff={next_rotation-now:.1f}, history_size={len(previously_opened_ports)}, active_sockets={len(sockets)}", flush=True)
+                    ###print(f"_honeypot_worker: Loop {loop_count}, now={now:.1f}, next_rotation={next_rotation:.1f}, diff={next_rotation-now:.1f}, history_size={len(previously_opened_ports)}, active_sockets={len(sockets)}", flush=True)
                 
                 # Collect port count data from all interfaces (new format: interface_name, port_counts)
                 while top_unwanted_ports_consumer.poll():
@@ -3031,23 +3034,23 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                 # Store/overwrite port counts for this interface
                                 interface_port_counts[interface_name] = port_data.copy()
                                 interface_names.add(interface_name)
-                                ###print(f"_honeypot_worker: Updated port counts for {interface_name}: {len(port_data)} ports", flush=True)
+                                ######print(f"_honeypot_worker: Updated port counts for {interface_name}: {len(port_data)} ports", flush=True)
                         elif isinstance(data, dict):
                             # Handle old format for compatibility
                             interface_port_counts["unknown"] = data.copy()
                             interface_names.add("unknown")
                     except (BrokenPipeError, EOFError, ConnectionResetError) as e:
                         # These errors are expected during updates when interface processes are terminated
-                        ###print(f"_honeypot_worker: Interface process communication error (likely during update): {e}", flush=True)
+                        ######print(f"_honeypot_worker: Interface process communication error (likely during update): {e}", flush=True)
                         pass  # Silently ignore these during normal operation
                     except Exception as e:
-                        print(f"_honeypot_worker: Error processing port count data: {type(e).__name__}: {e}", flush=True)
+                        ###print(f"_honeypot_worker: Error processing port count data: {type(e).__name__}: {e}", flush=True)
                         import traceback
-                        print(f"_honeypot_worker: Full traceback: {traceback.format_exc()}", flush=True)
+                        ###print(f"_honeypot_worker: Full traceback: {traceback.format_exc()}", flush=True)
                 
                 # Check if we need to clear port history (after 7 days)
                 if now >= history_clear_time:
-                    print(f"_honeypot_worker: Clearing port history after 7 days. Previously opened: {len(previously_opened_ports)} ports", flush=True)
+                    ###print(f"_honeypot_worker: Clearing port history after 7 days. Previously opened: {len(previously_opened_ports)} ports", flush=True)
                     previously_opened_ports.clear()
                     history_clear_time = now + 7 * 24 * 60 * 60  # Reset for another 7 days
                 
@@ -3087,7 +3090,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     else:
                                         svc = 'TELNET'
 
-                                print(f"_honeypot_worker: Received connection from {addr[0]}:{addr[1]} to port {port} (service: {svc})", flush=True)
+                                ###print(f"_honeypot_worker: Received connection from {addr[0]}:{addr[1]} to port {port} (service: {svc})", flush=True)
 
                                 # only proxy SSH and TELNET
                                 if svc in ('SSH', 'TELNET'):
@@ -3099,7 +3102,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                         else:  # TELNET
                                             connect_port = shared_honeypot_config.get('telnet_port', 12346)
                                     except Exception as e:
-                                        print(f"_honeypot_worker: Error reading shared config, using defaults: {e}", flush=True)
+                                        ###print(f"_honeypot_worker: Error reading shared config, using defaults: {e}", flush=True)
                                         remote_host = "128.9.28.79"
                                         connect_port = 12345 if svc == 'SSH' else 12346
 
@@ -3108,7 +3111,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     try:
                                         remote_conn.connect((remote_host, connect_port))
                                     except Exception as e:
-                                        print(f"_honeypot_worker: proxy connect failed for {svc} on port {port}: {e}", flush=True)
+                                        ###print(f"_honeypot_worker: proxy connect failed for {svc} on port {port}: {e}", flush=True)
                                         local_conn.close()
                                         continue
 
@@ -3117,7 +3120,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     local_ip = local_conn.getsockname()[0]
                                     #hdr = f"PROXY TCP4 {addr[0]} {local_ip} {addr[1]} {port}\r\n"
                                     hdr = f"PROXY TCP4 {addr[0]} {config_settings['database']} {addr[1]} {port}\r\n"
-                                    print(f"_honeypot_worker: Sending PROXY header: {hdr.strip()}", flush=True)
+                                    ###print(f"_honeypot_worker: Sending PROXY header: {hdr.strip()}", flush=True)
                                     remote_conn.sendall(hdr.encode())
 
                                     # bi-directional forwarding with connection tracking
@@ -3128,11 +3131,11 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                             while True:
                                                 buf = src.recv(4096)
                                                 if not buf:
-                                                    print(f"_honeypot_worker: {direction} connection closed normally", flush=True)
+                                                    ###print(f"_honeypot_worker: {direction} connection closed normally", flush=True)
                                                     break
                                                 dst.sendall(buf)
                                         except Exception as e:
-                                            print(f"_honeypot_worker: {direction} forwarding error: {e}", flush=True)
+                                            ###print(f"_honeypot_worker: {direction} forwarding error: {e}", flush=True)
                                         finally:
                                             for s in (src, dst):
                                                 try: s.close()
@@ -3142,17 +3145,17 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                                 connection_closed[0] = True
                                                 connection_semaphore.release()
                                                 active_connections[0] -= 1
-                                                print(f"_honeypot_worker: Connection slot released. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
+                                                ###print(f"_honeypot_worker: Connection slot released. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
 
                                     # Check if we can accept more connections
                                     if not connection_semaphore.acquire(blocking=False):
-                                        print(f"_honeypot_worker: Connection limit reached ({MAX_CONCURRENT_CONNECTIONS}), rejecting {addr[0]}:{addr[1]}", flush=True)
+                                        ###print(f"_honeypot_worker: Connection limit reached ({MAX_CONCURRENT_CONNECTIONS}), rejecting {addr[0]}:{addr[1]}", flush=True)
                                         local_conn.close()
                                         remote_conn.close()
                                         continue
 
                                     active_connections[0] += 1
-                                    print(f"_honeypot_worker: Connection accepted. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
+                                    ###print(f"_honeypot_worker: Connection accepted. Active: {active_connections[0]}/{MAX_CONCURRENT_CONNECTIONS}", flush=True)
 
                                     # Set socket timeouts to prevent idle connections from blocking forever
                                     # 3 minute timeout - if no data received, connection is closed
@@ -3167,27 +3170,27 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                         honeypot_data = prepare_honeypot_connection_data(addr[1], svc, addr[0], port)
                                         
                                         hp_upload_producer.send(honeypot_data)
-                                        print(f"_honeypot_worker: Sent honeypot data for {addr[0]}:{addr[1]} -> {port} ({svc})", flush=True)
+                                        ###print(f"_honeypot_worker: Sent honeypot data for {addr[0]}:{addr[1]} -> {port} ({svc})", flush=True)
                                     except Exception as e:
-                                        print(f"_honeypot_worker: Failed to send honeypot data: {e}", flush=True)
+                                        ###print(f"_honeypot_worker: Failed to send honeypot data: {e}", flush=True)
                                         traceback.print_exc()
 
-                                    print(f"_honeypot_worker: proxied {addr[0]}:{addr[1]} → {remote_host}:{connect_port} ({svc})", flush=True)
+                                    ###print(f"_honeypot_worker: proxied {addr[0]}:{addr[1]} → {remote_host}:{connect_port} ({svc})", flush=True)
                                 else:
                                     # Just close the connection for non-SSH/TELNET services
                                     local_conn.close()
-                                    print(f"_honeypot_worker: Closed connection from {addr[0]}:{addr[1]} to port {port} (unsupported service)", flush=True)
+                                    ###print(f"_honeypot_worker: Closed connection from {addr[0]}:{addr[1]} to port {port} (unsupported service)", flush=True)
                             except Exception as e:
-                                print(f"_honeypot_worker: Error handling connection: {e}", flush=True)
+                                ###print(f"_honeypot_worker: Error handling connection: {e}", flush=True)
                                 traceback.print_exc()
                     except Exception as e:
-                        print(f"_honeypot_worker: Error in select loop: {e}", flush=True)
+                        ###print(f"_honeypot_worker: Error in select loop: {e}", flush=True)
                         traceback.print_exc()
                 else:
                     time.sleep(1.0)
                     
             except Exception as e:
-                print(f"_honeypot_worker: Error in main loop: {e}", flush=True)
+                ###print(f"_honeypot_worker: Error in main loop: {e}", flush=True)
                 traceback.print_exc()
                 time.sleep(1.0)  # Prevent tight error loop
 
