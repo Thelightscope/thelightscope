@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.1"
+ls_version = "1.6.2"
 
 print(f"ls_version: {ls_version}")
 
@@ -2593,7 +2593,8 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 ###print(f"_honeypot_worker: Updated shared ports: {current_ports}", flush=True)
             except Exception as e:
                 ###print(f"_honeypot_worker: Error updating shared ports: {e}", flush=True)
-        
+                pass
+
         def try_bind_port(desired_port, max_attempts=10):
             """
             Try to bind to desired_port, and if it fails try nearby alternatives.
@@ -2628,13 +2629,15 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                     
                     if port != desired_port:
                         ###print(f"_honeypot_worker: Port {desired_port} in use, successfully bound to alternative port {port} (attempt {attempt + 1})", flush=True)
-                    
+                        pass
+
                     return s, port
                     
                 except OSError as e:
                     if e.errno == 98:  # EADDRINUSE - Address already in use
                         if attempt == 0:  # Only log for the first (desired) port
                             ###print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
+                            pass
                         continue
                     elif e.errno == 13:  # EACCES - Permission denied  
                         if port < 1024:
@@ -2727,7 +2730,8 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 ###print(f"_honeypot_worker: Initial startup port {actual_port} opened successfully", flush=True)
             else:
                 ###print(f"_honeypot_worker: Could not open port {desired_port} or any alternatives", flush=True)
-        
+                pass
+
         # Update shared memory with initial ports
         ###print(f"_honeypot_worker: Opened {len(sockets)} ports initially", flush=True)
         update_shared_honeypot_ports()
@@ -2928,7 +2932,8 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 ###print(f"_honeypot_worker: Total aggregated ports: {len(aggregated_counts)}", flush=True)
                 if aggregated_counts:
                     ###print(f"_honeypot_worker: Top 5 ports: {sorted(aggregated_counts.items(), key=lambda x: x[1], reverse=True)[:5]}", flush=True)
-                
+                    pass
+
                 # Get top ports > 1023, filter out system ports and previously opened ports
                 valid_ports = {p: c for p, c in aggregated_counts.items() if p > 1023}
                 ###print(f"_honeypot_worker: Valid ports (>1023): {len(valid_ports)}", flush=True)
@@ -2977,8 +2982,9 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                             target_ports.extend(random_ports)
                             ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports and {len(random_ports)} random ports (some may be reused): priority={priority_to_add}, random={random_ports}", flush=True)
                     else:
-                        ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports: {priority_to_add}", flush=True)   
-                
+                        ###print(f"_honeypot_worker: Added {len(priority_to_add)} priority ports: {priority_to_add}", flush=True)
+                        pass
+
                 current_ports = set(sockets.values())
                 to_open = set(target_ports) - current_ports
                 to_close = current_ports - set(target_ports)
@@ -3005,6 +3011,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                         ###print(f"_honeypot_worker: Auto-opened port {actual_port}", flush=True)
                     else:
                         ###print(f"_honeypot_worker: Could not auto-open port {desired_port} or any alternatives", flush=True)
+                        pass
 
                 update_shared_honeypot_ports()
                 interface_port_counts.clear()  # Reset for next cycle
@@ -3023,7 +3030,8 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 # Debug: print every 1000 loops to show we're running
                 if loop_count % 1000 == 0:
                     ###print(f"_honeypot_worker: Loop {loop_count}, now={now:.1f}, next_rotation={next_rotation:.1f}, diff={next_rotation-now:.1f}, history_size={len(previously_opened_ports)}, active_sockets={len(sockets)}", flush=True)
-                
+                    pass
+
                 # Collect port count data from all interfaces (new format: interface_name, port_counts)
                 while top_unwanted_ports_consumer.poll():
                     try:
@@ -3136,6 +3144,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                                 dst.sendall(buf)
                                         except Exception as e:
                                             ###print(f"_honeypot_worker: {direction} forwarding error: {e}", flush=True)
+                                            pass
                                         finally:
                                             for s in (src, dst):
                                                 try: s.close()
