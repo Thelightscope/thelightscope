@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.5.0"
+ls_version = "1.6.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -2650,19 +2650,69 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             print(f"_honeypot_worker: Failed to bind to port {desired_port} or any alternatives after {len(ports_to_try)} attempts", flush=True)
             return None, None
         
-        # Define priority ports to open first
-        priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
-        
+        # Detect NRP mode (database name starts with 'nrp')
+        nrp_mode = config_settings.get('database', '').startswith('nrp')
+
+        if nrp_mode:
+            # NRP mode: Use static ports (Calico GlobalNetworkPolicy handles firewall)
+            # These ports must match the ports configured in the Calico policy
+            # Based on real-world attack data showing most targeted ports
+            priority_ports = [1080, 1433, 2222, 2323, 2375, 3000, 3306, 3389, 4786, 5432,
+                            5555, 5900, 6379, 7547, 8000, 8081, 8291, 8443, 8728, 8888,
+                            9090, 9200, 9999, 11211, 12281, 17001, 23456, 25565, 27017, 33060]
+
+            # NRP port-to-service mapping (explicit mapping instead of even/odd)
+            nrp_ssh_ports = {
+                2222,   # SSH alternative
+                3389,   # RDP (credential-based like SSH)
+                5900,   # VNC (SSH-like authentication)
+                3306,   # MySQL (binary protocol)
+                5432,   # PostgreSQL (binary protocol)
+                1433,   # MS SQL Server (binary protocol)
+                27017,  # MongoDB (binary protocol)
+                33060,  # MySQL X Protocol
+                2375,   # Docker API
+                9200,   # Elasticsearch
+                8000,   # HTTP alt
+                3000,   # HTTP alt / Node.js
+                8443,   # HTTPS alt
+                9090,   # HTTP alt
+                1080,   # SOCKS proxy
+            }
+            nrp_telnet_ports = {
+                2323,   # Telnet alternative
+                4786,   # Cisco Smart Install
+                7547,   # TR-069 router management
+                8728,   # MikroTik RouterOS
+                8291,   # MikroTik Winbox
+                6379,   # Redis (text protocol)
+                11211,  # Memcached (text protocol)
+                5555,   # Generic backdoor
+                8081,   # HTTP alt
+                8888,   # HTTP alt
+                9999,   # Generic backdoor
+                12281,  # Generic scan target
+                17001,  # Generic scan target
+                23456,  # Generic scan target
+                25565,  # Minecraft
+            }
+            print(f"_honeypot_worker: NRP mode detected - using static port list ({len(priority_ports)} ports)", flush=True)
+        else:
+            # Standard mode: Use priority ports with dynamic rotation
+            priority_ports = [2323, 6379, 8080, 5555, 17001, 2222, 12281, 8728, 1024]
+            nrp_ssh_ports = None
+            nrp_telnet_ports = None
+
         # Open initial ports (priority first, then random if needed)
         import random
         initial_ports = priority_ports.copy()
-        
-        # If we need more than priority ports, add random ones
-        if len(initial_ports) < 10:
+
+        # If we need more than priority ports, add random ones (standard mode only)
+        if not nrp_mode and len(initial_ports) < 10:
             additional_needed = 10 - len(initial_ports)
             available_random = [p for p in range(1024, 65536) if p not in priority_ports]
             initial_ports.extend(random.sample(available_random, min(additional_needed, len(available_random))))
-        
+
         print(f"_honeypot_worker: initial_ports: {initial_ports}", flush=True)
         
         # Try to open initial ports with retry logic
@@ -3001,9 +3051,9 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                     previously_opened_ports.clear()
                     history_clear_time = now + 7 * 24 * 60 * 60  # Reset for another 7 days
                 
-                # Auto-rotate every 4 hours
-                if now >= next_rotation:
-                    print(f"\n\n _honeypot_worker: Rotating honeypots\n\n", flush=True)    
+                # Auto-rotate every 4 hours (standard mode only)
+                if not nrp_mode and now >= next_rotation:
+                    print(f"\n\n _honeypot_worker: Rotating honeypots\n\n", flush=True)
                     rotate_honeypots()
                     next_rotation = now + 4 * 60 * 60  # Rotate every 4 hours
 
@@ -3019,11 +3069,23 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                 local_conn, addr = sock.accept()
 
                                 port = sockets[sock]
-                                # Even ports use SSH, odd ports use TELNET
-                                if port % 2 == 0:
-                                    svc = 'SSH'
+
+                                # Determine service type based on port mapping (NRP) or even/odd (standard)
+                                if nrp_mode:
+                                    # NRP mode: use explicit port-to-service mapping
+                                    if port in nrp_ssh_ports:
+                                        svc = 'SSH'
+                                    elif port in nrp_telnet_ports:
+                                        svc = 'TELNET'
+                                    else:
+                                        # Fallback for any unmapped ports
+                                        svc = 'SSH' if port % 2 == 0 else 'TELNET'
                                 else:
-                                    svc = 'TELNET'
+                                    # Standard mode: even ports use SSH, odd ports use TELNET
+                                    if port % 2 == 0:
+                                        svc = 'SSH'
+                                    else:
+                                        svc = 'TELNET'
 
                                 print(f"_honeypot_worker: Received connection from {addr[0]}:{addr[1]} to port {port} (service: {svc})", flush=True)
 
