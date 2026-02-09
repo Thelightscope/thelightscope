@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.3"
+ls_version = "1.6.4"
 
 print(f"ls_version: {ls_version}")
 
@@ -2666,7 +2666,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             # Based on real-world attack data showing most targeted ports
             priority_ports = [1080, 1433, 2222, 2323, 2375, 3000, 3306, 3389, 4786, 5432,
                             5555, 5900, 6379, 7547, 8000, 8081, 8291, 8443, 8728, 8888,
-                            9090, 9200, 9999, 11211, 12281, 17001, 23456, 25565, 27017, 33060]
+                            9090, 9200, 9999, 12281, 17001, 23456, 25565, 27017, 33060]
 
             # NRP port-to-service mapping (explicit mapping instead of even/odd)
             nrp_ssh_ports = {
@@ -2693,7 +2693,6 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 8728,   # MikroTik RouterOS
                 8291,   # MikroTik Winbox
                 6379,   # Redis (text protocol)
-                11211,  # Memcached (text protocol)
                 5555,   # Generic backdoor
                 8081,   # HTTP alt
                 8888,   # HTTP alt
