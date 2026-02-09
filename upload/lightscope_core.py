@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.2"
+ls_version = "1.6.3"
 
 print(f"ls_version: {ls_version}")
 
@@ -1964,7 +1964,8 @@ def is_virtual_interface(interface_name):
         'podman',      # Podman
         'flannel',     # Kubernetes Flannel
         'weave',       # Kubernetes Weave
-        'calico',      # Kubernetes Calico
+        'cali',        # Kubernetes Calico (interfaces are named cali*)
+        'vxlan',       # VXLAN overlay networks (e.g. vxlan.calico)
         'tap',         # TAP devices (OpenStack/QEMU)
         'qbr',         # OpenStack quantum bridge
         'qvb',         # OpenStack quantum veth bridge-side
