@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.4"
+ls_version = "1.6.5"
 
 print(f"ls_version: {ls_version}")
 
@@ -2665,7 +2665,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
             # These ports must match the ports configured in the Calico policy
             # Based on real-world attack data showing most targeted ports
             priority_ports = [1080, 1433, 2222, 2323, 2375, 3000, 3306, 3389, 4786, 5432,
-                            5555, 5900, 6379, 7547, 8000, 8081, 8291, 8443, 8728, 8888,
+                            5555, 5900, 6379, 7547, 8081, 8291, 8728,
                             9090, 9200, 9999, 12281, 17001, 23456, 25565, 27017, 33060]
 
             # NRP port-to-service mapping (explicit mapping instead of even/odd)
@@ -2680,9 +2680,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 33060,  # MySQL X Protocol
                 2375,   # Docker API
                 9200,   # Elasticsearch
-                8000,   # HTTP alt
                 3000,   # HTTP alt / Node.js
-                8443,   # HTTPS alt
                 9090,   # HTTP alt
                 1080,   # SOCKS proxy
             }
@@ -2695,7 +2693,6 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 6379,   # Redis (text protocol)
                 5555,   # Generic backdoor
                 8081,   # HTTP alt
-                8888,   # HTTP alt
                 9999,   # Generic backdoor
                 12281,  # Generic scan target
                 17001,  # Generic scan target
