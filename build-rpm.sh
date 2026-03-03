@@ -73,6 +73,16 @@ else
     sed -i "s/Version:.*/Version: $VERSION/" "$RPM_BUILD_DIR/SPECS/lightscope.spec"
 fi
 
+# If LIGHTSCOPE_NO_HONEYPOT is set, default honeypots to disabled in spec config templates
+if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
+    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: setting honeypots = no in spec config templates"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/^honeypots = yes/honeypots = no/' "$RPM_BUILD_DIR/SPECS/lightscope.spec"
+    else
+        sed -i 's/^honeypots = yes/honeypots = no/' "$RPM_BUILD_DIR/SPECS/lightscope.spec"
+    fi
+fi
+
 # Build the RPM
 echo "Creating RPM package..."
 

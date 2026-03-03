@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.6.6"
+ls_version = "1.7.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -1267,7 +1267,8 @@ class Ports:
 
             #send the honypot the top ports
             if now >= honeypot_send_top_ports:
-                self.top_unwanted_ports_producer.send((self.interface_human_readable,self.port_counts))
+                if self.top_unwanted_ports_producer:
+                    self.top_unwanted_ports_producer.send((self.interface_human_readable,self.port_counts))
                 honeypot_send_top_ports = now + 60 * 60 * 1  # Send every 5 minutes for better data
 
             #check for honeypot open ports
@@ -2144,35 +2145,46 @@ def lightscope_run():
         system_info = get_system_info()
         external_network_information = fetch_light_scope_info()
 
-         # begin honeypot
-        # Create shared memory for honeypot ports (accessible by all processes)
         import multiprocessing
-        manager = multiprocessing.Manager()
-        shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
 
-        # Create shared dict for honeypot forwarding configuration with hardcoded defaults
-        shared_honeypot_config = manager.dict({
-            'remote_host': '128.9.28.79',
-            'ssh_port': 12345,
-            'telnet_port': 12346
-        })
+        honeypots_enabled = config_settings.get('honeypots', 'yes').lower().strip() == 'yes'
 
-        top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
-        hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
+        if honeypots_enabled:
+            # begin honeypot
+            # Create shared memory for honeypot ports (accessible by all processes)
+            manager = multiprocessing.Manager()
+            shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
 
-        hp_proc = multiprocessing.Process(
-            target=_honeypot_worker,
-            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
-            daemon=True
-        )
-        hp_uploader = multiprocessing.Process(
-            target=send_honeypot_data,
-            args=(hp_upload_consumer,),
-            name="honeypot_uploader"
-        )
-        hp_proc.start()
-        hp_uploader.start()
-        # end honeypot
+            # Create shared dict for honeypot forwarding configuration with hardcoded defaults
+            shared_honeypot_config = manager.dict({
+                'remote_host': '128.9.28.79',
+                'ssh_port': 12345,
+                'telnet_port': 12346
+            })
+
+            top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
+            hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
+
+            hp_proc = multiprocessing.Process(
+                target=_honeypot_worker,
+                args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
+                daemon=True
+            )
+            hp_uploader = multiprocessing.Process(
+                target=send_honeypot_data,
+                args=(hp_upload_consumer,),
+                name="honeypot_uploader"
+            )
+            hp_proc.start()
+            hp_uploader.start()
+            print("[+] Honeypots enabled - honeypot worker and uploader started")
+            # end honeypot
+        else:
+            # Honeypots disabled - no ports opened, no forwarding, no honeypot data upload
+            shared_open_honeypots = []
+            shared_honeypot_config = None
+            top_unwanted_ports_producer = None
+            print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
 
         # helper to spawn the three subprocesses for one interface
         def spawn_for_interface_mac_linux(iface, internal_ips, top_unwanted_ports_producer, shared_open_honeypots, shared_honeypot_config):
@@ -2267,35 +2279,46 @@ def lightscope_run():
         system_info = get_system_info()
         external_network_information = fetch_light_scope_info()
 
-        # begin honeypot
-        # Create shared memory for honeypot ports (accessible by all processes)
         import multiprocessing
-        manager = multiprocessing.Manager()
-        shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
 
-        # Create shared dict for honeypot forwarding configuration with hardcoded defaults
-        shared_honeypot_config = manager.dict({
-            'remote_host': '128.9.28.79',
-            'ssh_port': 12345,
-            'telnet_port': 12346
-        })
+        honeypots_enabled = config_settings.get('honeypots', 'yes').lower().strip() == 'yes'
 
-        top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
-        hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
+        if honeypots_enabled:
+            # begin honeypot
+            # Create shared memory for honeypot ports (accessible by all processes)
+            manager = multiprocessing.Manager()
+            shared_open_honeypots = manager.list()  # Shared list of open honeypot ports
 
-        hp_proc = multiprocessing.Process(
-            target=_honeypot_worker,
-            args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
-            daemon=True
-        )
-        hp_uploader = multiprocessing.Process(
-            target=send_honeypot_data,
-            args=(hp_upload_consumer,),
-            name="honeypot_uploader"
-        )
-        hp_proc.start()
-        hp_uploader.start()
-        # end honeypot
+            # Create shared dict for honeypot forwarding configuration with hardcoded defaults
+            shared_honeypot_config = manager.dict({
+                'remote_host': '128.9.28.79',
+                'ssh_port': 12345,
+                'telnet_port': 12346
+            })
+
+            top_unwanted_ports_consumer, top_unwanted_ports_producer = multiprocessing.Pipe(duplex=False)
+            hp_upload_consumer, hp_upload_producer = multiprocessing.Pipe(duplex=False)
+
+            hp_proc = multiprocessing.Process(
+                target=_honeypot_worker,
+                args=(top_unwanted_ports_consumer, shared_open_honeypots, hp_upload_producer, external_network_information, config_settings, system_info, shared_honeypot_config),
+                daemon=True
+            )
+            hp_uploader = multiprocessing.Process(
+                target=send_honeypot_data,
+                args=(hp_upload_consumer,),
+                name="honeypot_uploader"
+            )
+            hp_proc.start()
+            hp_uploader.start()
+            print("[+] Honeypots enabled - honeypot worker and uploader started")
+            # end honeypot
+        else:
+            # Honeypots disabled - no ports opened, no forwarding, no honeypot data upload
+            shared_open_honeypots = []
+            shared_honeypot_config = None
+            top_unwanted_ports_producer = None
+            print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
 
         # helper to spawn the three subprocesses for one interface
         def spawn_for_interface_windows(iface, internal_ips, shared_honeypot_config):
@@ -2404,6 +2427,7 @@ class configuration_reader:
         self.osinfo=""
         self.lookup_network_information_list={}
         self.autoupdate=""
+        self.honeypots=""
         self.randomization_key="uninitialized"
         self.interface=""
         self.initialize_config("config.ini")
@@ -2413,7 +2437,7 @@ class configuration_reader:
 
     def get_config(self):
         config={'database':self.database,'self_telnet_and_ssh_honeypot_ports_to_forward':self.self_telnet_and_ssh_honeypot_ports_to_forward,
-        'autoupdate':self.autoupdate,'randomization_key':self.randomization_key,'interface':self.interface}
+        'autoupdate':self.autoupdate,'honeypots':self.honeypots,'randomization_key':self.randomization_key,'interface':self.interface}
         return config
 
     
@@ -2426,6 +2450,7 @@ class configuration_reader:
             self.database = config.get('Settings', 'database', fallback="Can't read config").lower()
             self.randomization_key=config.get('Settings', 'randomization_key', fallback="Can't read config").lower()
             self.autoupdate=config.get('Settings', 'autoupdate', fallback="Can't read config").lower()
+            self.honeypots=config.get('Settings', 'honeypots', fallback='yes').lower().strip()
             self.self_telnet_and_ssh_honeypot_ports_to_forward=config.get('Settings', 'self_telnet_and_ssh_honeypot_ports_to_forward', fallback=[])
             self.interface=config.get('Settings', 'interface', fallback="").strip()
 
@@ -2500,6 +2525,12 @@ class configuration_reader:
             autoupdate="yes"
             config['Settings']['autoupdate'] = autoupdate
             print(f"autoupdate not found; set to: {autoupdate}")
+
+        # Check for the 'honeypots' option.
+        if 'honeypots' not in config['Settings'] or not config['Settings']['honeypots'].strip():
+            honeypots="yes"
+            config['Settings']['honeypots'] = honeypots
+            print(f"honeypots not found; set to: {honeypots}")
 
         # Check for the 'interface' option.
         if 'interface' not in config['Settings']:

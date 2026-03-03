@@ -71,6 +71,16 @@ else
     echo "Warning: python-libpcap directory not found"
 fi
 
+# If LIGHTSCOPE_NO_HONEYPOT is set, default honeypots to disabled in config template
+if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
+    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: setting honeypots = no in postinst config template"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/^honeypots = yes/honeypots = no/' "$BUILD_DIR/DEBIAN/postinst"
+    else
+        sed -i 's/^honeypots = yes/honeypots = no/' "$BUILD_DIR/DEBIAN/postinst"
+    fi
+fi
+
 # Update version in control file
 # Handle macOS vs Linux sed differences
 if [[ "$OSTYPE" == "darwin"* ]]; then

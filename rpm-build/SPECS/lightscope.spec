@@ -157,14 +157,18 @@ update_check_interval = 24
 # Enable debug logging (yes/no)
 debug_logging = no
 
+# Enable honeypot functionality (yes/no)
+# Set to 'no' to disable honeypot port opening and forwarding
+honeypots = yes
+
 # Custom interface to monitor (leave empty for auto-detection)
-interface = 
+interface =
 
 # Maximum number of concurrent honeypot ports
 max_honeypot_ports = 10
 
 # Honeypot rotation interval in hours
-honeypot_rotation_interval = 4 
+honeypot_rotation_interval = 4
 CONFIG_EOF
 
 # Create command line wrapper
@@ -314,16 +318,20 @@ update_check_interval = 24
 # Enable debug logging (yes/no)
 debug_logging = no
 
+# Enable honeypot functionality (yes/no)
+# Set to 'no' to disable honeypot port opening and forwarding
+honeypots = yes
+
 # Custom interface to monitor (leave empty for auto-detection)
-interface = 
+interface =
 
 # Maximum number of concurrent honeypot ports
 max_honeypot_ports = 10
 
 # Honeypot rotation interval in hours
-honeypot_rotation_interval = 4 
+honeypot_rotation_interval = 4
 EOF
-    
+
     chown lightscope:lightscope /opt/lightscope/config.ini || true
     chmod 644 /opt/lightscope/config.ini || true
     print_status "✅ Configuration file created with database name: $DB_NAME"
