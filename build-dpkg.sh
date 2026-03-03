@@ -105,7 +105,11 @@ if [ -f "$BUILD_DIR/opt/lightscope/config/lightscope-public.pem" ]; then
 fi
 
 # Build the package
-OUTPUT_FILE="${PACKAGE_NAME}_${VERSION}_all.deb"
+if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
+    OUTPUT_FILE="${PACKAGE_NAME}-nohoneypot_${VERSION}_all.deb"
+else
+    OUTPUT_FILE="${PACKAGE_NAME}_${VERSION}_all.deb"
+fi
 echo "Creating package: $OUTPUT_FILE"
 
 dpkg-deb --build "$BUILD_DIR" "$OUTPUT_FILE"

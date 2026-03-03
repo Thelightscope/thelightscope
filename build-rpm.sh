@@ -114,6 +114,13 @@ ACTUAL_FILENAME=$(basename "$ACTUAL_RPM")
 # Move the built RPM to the current directory
 mv "$ACTUAL_RPM" .
 
+# If LIGHTSCOPE_NO_HONEYPOT is set, rename the output file to include -nohoneypot
+if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
+    NOHP_FILENAME=$(echo "$ACTUAL_FILENAME" | sed "s/^${PACKAGE_NAME}-/${PACKAGE_NAME}-nohoneypot-/")
+    mv "$ACTUAL_FILENAME" "$NOHP_FILENAME"
+    ACTUAL_FILENAME="$NOHP_FILENAME"
+fi
+
 echo "RPM package built successfully: $ACTUAL_FILENAME"
 echo "Build complete!"
 echo "To install: sudo rpm -i $ACTUAL_FILENAME"

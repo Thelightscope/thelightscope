@@ -44,31 +44,39 @@ else
 fi
 
 echo ""
-echo "2. Building dpkg package..."
+echo "2. Building standard dpkg package (honeypots=yes)..."
 ./build-dpkg.sh
 
 echo ""
-echo "3. Package built successfully!"
+echo "3. Building no-honeypot dpkg package (honeypots=no)..."
+LIGHTSCOPE_NO_HONEYPOT=1 ./build-dpkg.sh
+
+echo ""
+echo "4. Packages built successfully!"
 ls -la *.deb
 
 echo ""
-echo "4. Package information:"
-dpkg --info *.deb
+echo "5. Package information (standard):"
+dpkg --info lightscope_*_all.deb
 
 echo ""
-echo "5. Package contents:"
-dpkg --contents *.deb
+echo "6. Package information (no-honeypot):"
+dpkg --info lightscope-nohoneypot_*_all.deb
 
 echo ""
-echo "6. Signing the code..."
+echo "7. Signing the code..."
 python3 sign-and-upload.py --verify --package-type deb
 
 echo ""
-echo "7. Upload directory created:"
+echo "8. Upload directory created:"
 ls -la upload/
 
-echo "8. Archive files created:"
+echo "9. Archive files created:"
 ls -la lightscope_v*_upload.*
+
+VERSION=$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')
+STD_DEB="lightscope_${VERSION}_all.deb"
+NOHP_DEB="lightscope-nohoneypot_${VERSION}_all.deb"
 
 echo ""
 echo "=== Test Complete ==="
@@ -78,46 +86,30 @@ echo "=============================================="
 echo ""
 echo "Files created for distribution:"
 echo "  1. upload/ directory - Contains all distribution files"
-echo "  2. lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz - Complete package archive"
-echo "  3. lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb - Debian installer"
+echo "  2. lightscope_v${VERSION}_upload.tar.gz - Complete package archive"
+echo "  3. $STD_DEB - Debian installer (honeypots enabled)"
+echo "  4. $NOHP_DEB - Debian installer (honeypots disabled)"
 echo ""
 echo "🚀 SERVER UPLOAD LOCATIONS:"
 echo "=============================================="
 echo ""
 echo "ALL FILES GO TO: 📁 /var/www/lightscope/latest/"
 echo ""
-echo "   ├── lightscope_core.py           → https://thelightscope.com/latest/lightscope_core.py"
-echo "   ├── lightscope_core.py.sig       → https://thelightscope.com/latest/lightscope_core.py.sig"
-echo "   ├── public-key                   → https://thelightscope.com/latest/public-key"
-echo "   ├── version                      → https://thelightscope.com/latest/version"
-echo "   └── lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb    → https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
-echo ""
-echo "📋 UPLOAD COMMANDS:"
-echo "=============================================="
-echo ""
-echo "# Extract and upload ALL files to /latest/:"
-echo "tar -xzf lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz"
-echo "scp upload/lightscope_core.py \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
-echo "scp upload/lightscope_core.py.sig \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
-echo "scp upload/lightscope-public.pem \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/public-key"
-echo "scp upload/version \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/version"
-echo "scp lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb \${SERVER_USER}@\${SERVER_HOST}:/var/www/lightscope/latest/"
-echo ""
-echo "🧪 TESTING DEPLOYMENT:"
-echo "=============================================="
-echo ""
-echo "# Test all endpoints (all in /latest/ now):"
-echo "curl https://thelightscope.com/latest/version"
-echo "curl https://thelightscope.com/latest/public-key"
-echo "curl https://thelightscope.com/latest/lightscope_core.py"
-echo "curl https://thelightscope.com/latest/lightscope_core.py.sig"
-echo "curl https://thelightscope.com/latest/lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
+echo "   ├── lightscope_core.py                → https://thelightscope.com/latest/lightscope_core.py"
+echo "   ├── lightscope_core.py.sig            → https://thelightscope.com/latest/lightscope_core.py.sig"
+echo "   ├── public-key                        → https://thelightscope.com/latest/public-key"
+echo "   ├── version                           → https://thelightscope.com/latest/version"
+echo "   ├── $STD_DEB  → (standard)"
+echo "   └── $NOHP_DEB → (no-honeypot)"
 echo ""
 echo "🔧 LOCAL TESTING:"
 echo "=============================================="
 echo ""
-echo "# Test installation:"
-echo "sudo dpkg -i lightscope_$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_all.deb"
+echo "# Test standard installation:"
+echo "sudo dpkg -i $STD_DEB"
+echo ""
+echo "# Test no-honeypot installation:"
+echo "sudo dpkg -i $NOHP_DEB"
 echo ""
 echo "# Check service status:"
 echo "sudo systemctl status lightscope"
@@ -125,7 +117,7 @@ echo ""
 echo "# View logs:"
 echo "sudo journalctl -fu lightscope"
 echo ""
-echo "✅ Package ready for distribution!"
+echo "✅ Packages ready for distribution!"
 
 echo ""
 echo "🚀 AUTOMATED DEPLOYMENT TO SERVER"
@@ -156,9 +148,11 @@ read -s SERVER_PASSWORD
 echo ""
 echo "📤 Uploading files to server..."
 
-# Upload the tar.gz file
-echo "Uploading lightscope_v$(grep -o 'ls_version = "[^"]*"' lightscope/lightscope_core.py | sed 's/ls_version = "\(.*\)"/\1/')_upload.tar.gz..."
+# Upload the tar.gz file and both deb files
+echo "Uploading archive and deb packages..."
 sshpass -p "$SERVER_PASSWORD" scp lightscope_v*_upload.tar.gz ${SERVER_USER_HOST}:~/
+sshpass -p "$SERVER_PASSWORD" scp "$STD_DEB" ${SERVER_USER_HOST}:~/
+sshpass -p "$SERVER_PASSWORD" scp "$NOHP_DEB" ${SERVER_USER_HOST}:~/
 
 echo ""
 echo "🔧 Deploying on remote server..."
@@ -166,99 +160,54 @@ echo "🔧 Deploying on remote server..."
 # Create deployment script
 sshpass -p "$SERVER_PASSWORD" ssh ${SERVER_USER_HOST} "cat > /tmp/deploy.sh << 'EOF'
 #!/bin/bash
-echo 'Moving archive to /tmp...'
+echo 'Moving files to /tmp...'
 mv lightscope_v*_upload.tar.gz /tmp/ 2>/dev/null || true
+mv lightscope_*_all.deb /tmp/ 2>/dev/null || true
+mv lightscope-nohoneypot_*_all.deb /tmp/ 2>/dev/null || true
 
 echo 'Switching to root and deploying...'
 sudo bash -c '
-
-    
-    echo \"Moving archive to target directory...\"
+    echo \"Moving files to target directory...\"
     mv /tmp/lightscope_v*_upload.tar.gz /var/www/lightscope/latest/
-    
+    mv /tmp/lightscope_*_all.deb /var/www/lightscope/latest/ 2>/dev/null || true
+    mv /tmp/lightscope-nohoneypot_*_all.deb /var/www/lightscope/latest/ 2>/dev/null || true
+
     echo \"Changing to target directory...\"
     cd /var/www/lightscope/latest/
-    
+
     echo \"Extracting archive...\"
-    echo \"Archive contents before extraction:\"
-    tar -tzf lightscope_v*_upload.tar.gz | head -10
     tar -xzf lightscope_v*_upload.tar.gz
-    echo \"Directory contents after extraction:\"
-    ls -la
-    
+
     echo \"Moving contents from upload directory...\"
-    NEW_DEB_FILE=\"\"
     if [ -d upload ]; then
-        echo \"Found upload directory, moving contents...\"
-        ls -la upload/
-        # Capture the deb file name from upload directory before moving
-        NEW_DEB_FILE=\$(ls upload/lightscope_*_all.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
         mv upload/* . 2>/dev/null || echo \"No files in upload directory\"
         rm -rf upload/
-    else
-        echo \"Warning: upload directory not found after extraction\"
-        echo \"Checking for alternative structure...\"
-        echo \"Current directory contents:\"
-        ls -la
-        
-        # Check if files are in subdirectories
-        for dir in */; do
-            if [ -d \"\$dir\" ]; then
-                echo \"Checking directory: \$dir\"
-                ls -la \"\$dir\"
-                if [ -f \"\$dir/lightscope_core.py\" ]; then
-                    echo \"Found lightscope_core.py in \$dir, moving contents...\"
-                    # Capture the deb file name from subdirectory before moving
-                    NEW_DEB_FILE=\$(ls \"\$dir\"/lightscope_*_all.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null)
-                    mv \"\$dir\"/* . 2>/dev/null || echo \"No files to move from \$dir\"
-                    rm -rf \"\$dir\"
-                    break
-                fi
-            fi
-        done
     fi
-    
-    echo \"Final directory contents after moving files:\"
-    ls -la
-    
-    echo \"Cleaning up...\"
-    rm lightscope_v*_upload.tar.gz
-    
-    echo \"Creating generic latest.deb file...\"
-    # Remove existing latest.deb file first to ensure clean overwrite
-    rm -f lightscope_latest.deb
-    # Use the deb file that was just uploaded, or find the most recent one
-    if [ -n \"\$NEW_DEB_FILE\" ] && [ -f \"\$NEW_DEB_FILE\" ]; then
-        echo \"Using newly uploaded deb file: \$NEW_DEB_FILE\"
-        cp \"\$NEW_DEB_FILE\" lightscope_latest.deb
-        echo \"Successfully created lightscope_latest.deb from \$NEW_DEB_FILE\"
-        ls -la lightscope_latest.deb
-    else
-        echo \"Newly uploaded deb file not found, looking for any available deb file...\"
-        DEB_FILE=\$(ls -t lightscope_*_all.deb 2>/dev/null | head -1)
-        if [ -n \"\$DEB_FILE\" ] && [ -f \"\$DEB_FILE\" ]; then
-            echo \"Found deb file: \$DEB_FILE\"
-            cp \"\$DEB_FILE\" lightscope_latest.deb
-            echo \"Successfully created lightscope_latest.deb from \$DEB_FILE\"
-            ls -la lightscope_latest.deb
-        else
-            echo \"Warning: No lightscope_*_all.deb file found to copy\"
-            echo \"Current directory contents:\"
-            ls -la
-        fi
+
+    echo \"Cleaning up archive...\"
+    rm -f lightscope_v*_upload.tar.gz
+
+    echo \"Creating generic latest deb files...\"
+    rm -f lightscope_latest.deb lightscope-nohoneypot_latest.deb
+
+    STD=\$(ls -t lightscope_*_all.deb 2>/dev/null | grep -v nohoneypot | head -1)
+    if [ -n \"\$STD\" ] && [ -f \"\$STD\" ]; then
+        cp \"\$STD\" lightscope_latest.deb
+        echo \"Created lightscope_latest.deb from \$STD\"
     fi
-    
+
+    NOHP=\$(ls -t lightscope-nohoneypot_*_all.deb 2>/dev/null | head -1)
+    if [ -n \"\$NOHP\" ] && [ -f \"\$NOHP\" ]; then
+        cp \"\$NOHP\" lightscope-nohoneypot_latest.deb
+        echo \"Created lightscope-nohoneypot_latest.deb from \$NOHP\"
+    fi
+
     echo \"Setting proper permissions...\"
     chown -R www-data:www-data /var/www/lightscope/latest/
-    
-    # Set permissions only if files exist
     if ls /var/www/lightscope/latest/* 1> /dev/null 2>&1; then
         chmod -R 644 /var/www/lightscope/latest/*
-        echo \"Permissions set successfully\"
-    else
-        echo \"Warning: No files found to set permissions on\"
     fi
-    
+
     echo \"Deployment complete!\"
     ls -la /var/www/lightscope/latest/
 '
@@ -274,4 +223,6 @@ echo "✅ DEPLOYMENT COMPLETE!"
 echo ""
 echo "🧪 You can now test the deployment:"
 echo "curl https://thelightscope.com/latest/version"
-echo "curl https://thelightscope.com/latest/public-key" 
+echo "curl https://thelightscope.com/latest/public-key"
+echo "curl -O https://thelightscope.com/latest/lightscope_latest.deb"
+echo "curl -O https://thelightscope.com/latest/lightscope-nohoneypot_latest.deb" 
