@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.7.4"
+ls_version = "1.7.5"
 
 print(f"ls_version: {ls_version}")
 
@@ -500,25 +500,28 @@ class Ports:
 
         self.unwanted_packet_count=0
 
-        # Parse optional additional IP ranges/addresses to monitor (comma-separated CIDR or bare IPs)
-        self.additional_ipv4_networks = []
-        self.additional_ipv6_networks = []
-        additional_ranges = config_settings.get('additional_ip_ranges', '').strip()
-        if additional_ranges:
-            for entry in additional_ranges.split(','):
+        # Parse optional whitelist of IP ranges/addresses to monitor (comma-separated CIDR or bare IPs).
+        # When set, ONLY packets matching one of these ranges are treated as local — auto-discovered
+        # interface IPs and the external IP are ignored. When empty, fall back to auto-discovered behavior.
+        self.monitored_ipv4_networks = []
+        self.monitored_ipv6_networks = []
+        monitored_ranges = config_settings.get('monitored_ip_ranges', '').strip()
+        if monitored_ranges:
+            for entry in monitored_ranges.split(','):
                 entry = entry.strip()
                 if not entry:
                     continue
                 try:
                     net = ipaddress.ip_network(entry, strict=False)
                 except ValueError as e:
-                    print(f"WARNING: Invalid additional_ip_ranges entry {entry!r}: {e}")
+                    print(f"WARNING: Invalid monitored_ip_ranges entry {entry!r}: {e}")
                     continue
                 if net.version == 4:
-                    self.additional_ipv4_networks.append(net)
+                    self.monitored_ipv4_networks.append(net)
                 else:
-                    self.additional_ipv6_networks.append(net)
-                print(f"Also monitoring additional range/address: {net}")
+                    self.monitored_ipv6_networks.append(net)
+                print(f"Restricting monitoring to range/address: {net}")
+        self.use_ip_range_whitelist = bool(self.monitored_ipv4_networks or self.monitored_ipv6_networks)
 
         #self.internal_ip_randomized = [ self.randomize_ip(ip) for ip in internal_ips ]
         
@@ -665,29 +668,26 @@ class Ports:
     
     
     
-    def _ip_in_additional_ranges(self, ip_str):
-        # Fast bail-out when no additional ranges are configured (the common case)
-        if not self.additional_ipv4_networks and not self.additional_ipv6_networks:
-            return False
+    def _ip_in_monitored_ranges(self, ip_str):
         try:
             ip_obj = ipaddress.ip_address(ip_str)
         except ValueError:
             return False
-        networks = self.additional_ipv4_networks if ip_obj.version == 4 else self.additional_ipv6_networks
+        networks = self.monitored_ipv4_networks if ip_obj.version == 4 else self.monitored_ipv6_networks
         for net in networks:
             if ip_obj in net:
                 return True
         return False
 
-    def is_ip_dst_on_local_network(self,ip_dst):
-        if ip_dst in self.internal_ips['ipv4'] or ip_dst in self.internal_ips['ipv6'] or ip_dst==self.external_ip:
-            return True
-        return self._ip_in_additional_ranges(ip_dst)
+    def is_ip_dst_on_local_network(self, ip_dst):
+        if self.use_ip_range_whitelist:
+            return self._ip_in_monitored_ranges(ip_dst)
+        return ip_dst in self.internal_ips['ipv4'] or ip_dst in self.internal_ips['ipv6'] or ip_dst == self.external_ip
 
-    def is_ip_src_on_local_network(self,ip_src):
-        if ip_src in self.internal_ips['ipv4'] or ip_src in self.internal_ips['ipv6'] or ip_src==self.external_ip:
-            return True
-        return self._ip_in_additional_ranges(ip_src)
+    def is_ip_src_on_local_network(self, ip_src):
+        if self.use_ip_range_whitelist:
+            return self._ip_in_monitored_ranges(ip_src)
+        return ip_src in self.internal_ips['ipv4'] or ip_src in self.internal_ips['ipv6'] or ip_src == self.external_ip
     
     def add_L2_reachable_host(self,ip,MAC,current_packet):
         if not self.is_ip_dst_on_local_network(ip):
@@ -2044,7 +2044,9 @@ def choose_mac_linux_interface(specific_interfaces=None):
     addrs = psutil.net_if_addrs()
     result = {}
 
-    # Whitelist mode: hard-fail on any bad entry
+    # Whitelist mode: hard-fail on any bad entry. Loopback/link-local addresses
+    # are kept (the auto-detect path strips them; an explicit whitelist overrides
+    # that so loopback monitoring works when the user asks for it).
     if specific_interfaces:
         for iface in specific_interfaces:
             if iface not in stats:
@@ -2055,23 +2057,15 @@ def choose_mac_linux_interface(specific_interfaces=None):
                 print(f"ERROR: Specified interface '{iface}' is not up!")
                 sys.exit(1)
 
-            ipv4s = [
-                a.address for a in addrs.get(iface, [])
-                if a.family == socket.AF_INET
-                and not a.address.startswith("127.")
-            ]
-            ipv6s = [
-                a.address for a in addrs.get(iface, [])
-                if a.family == socket.AF_INET6
-                and not (a.address == '::1' or a.address.startswith('fe80::1'))
-            ]
+            ipv4s = [a.address for a in addrs.get(iface, []) if a.family == socket.AF_INET]
+            ipv6s = [a.address for a in addrs.get(iface, []) if a.family == socket.AF_INET6]
 
             if not (ipv4s or ipv6s):
                 print(f"ERROR: Specified interface '{iface}' has no valid IPv4 or IPv6 addresses!")
                 sys.exit(1)
 
             result[iface] = {'ipv4': ipv4s, 'ipv6': ipv6s}
-            print(f"Using custom interface from config: {iface}")
+            print(f"Using custom interface from config: {iface} (ipv4={ipv4s}, ipv6={ipv6s})")
         return result
 
     # Auto-detect mode (original behavior)
@@ -2479,7 +2473,7 @@ class configuration_reader:
         self.honeypots=""
         self.randomization_key="uninitialized"
         self.interface=""
-        self.additional_ip_ranges=""
+        self.monitored_ip_ranges=""
         self.initialize_config("config.ini")
         self.load_config(config_file)
         print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
@@ -2488,7 +2482,7 @@ class configuration_reader:
     def get_config(self):
         config={'database':self.database,'self_telnet_and_ssh_honeypot_ports_to_forward':self.self_telnet_and_ssh_honeypot_ports_to_forward,
         'autoupdate':self.autoupdate,'honeypots':self.honeypots,'randomization_key':self.randomization_key,'interface':self.interface,
-        'additional_ip_ranges':self.additional_ip_ranges}
+        'monitored_ip_ranges':self.monitored_ip_ranges}
         return config
 
     
@@ -2504,7 +2498,7 @@ class configuration_reader:
             self.honeypots=config.get('Settings', 'honeypots', fallback='yes').lower().strip()
             self.self_telnet_and_ssh_honeypot_ports_to_forward=config.get('Settings', 'self_telnet_and_ssh_honeypot_ports_to_forward', fallback=[])
             self.interface=config.get('Settings', 'interface', fallback="").strip()
-            self.additional_ip_ranges=config.get('Settings', 'additional_ip_ranges', fallback="").strip()
+            self.monitored_ip_ranges=config.get('Settings', 'monitored_ip_ranges', fallback="").strip()
 
 
 
@@ -2589,10 +2583,10 @@ class configuration_reader:
             config['Settings']['interface'] = ""
             print(f"interface not found; set to empty (auto-detection enabled)")
 
-        # Check for the 'additional_ip_ranges' option.
-        if 'additional_ip_ranges' not in config['Settings']:
-            config['Settings']['additional_ip_ranges'] = ""
-            print(f"additional_ip_ranges not found; set to empty (none monitored beyond auto-detected IPs)")
+        # Check for the 'monitored_ip_ranges' option.
+        if 'monitored_ip_ranges' not in config['Settings']:
+            config['Settings']['monitored_ip_ranges'] = ""
+            print(f"monitored_ip_ranges not found; set to empty (auto-detected interface IPs will be used)")
 
 
         # Write the configuration back to the file.
@@ -2610,10 +2604,12 @@ class configuration_reader:
                         f.write('# Custom interface(s) to monitor as a whitelist (comma-separated; leave empty for auto-detection).\n')
                         f.write('# Any listed interface that is missing, down, or has no valid IPs will cause lightscope to exit.\n')
                         f.write('# Example: interface = en0, en5\n')
-                    elif line.strip().startswith('additional_ip_ranges ='):
-                        f.write('# Additional IPs / CIDR ranges to monitor in addition to auto-detected host IPs.\n')
-                        f.write('# Comma-separated. Accepts bare IPs and CIDRs (/8, /16, /22, /24, etc.) for IPv4 and IPv6.\n')
-                        f.write('# Example: additional_ip_ranges = 192.168.1.0/24, 10.0.0.0/8, 2001:db8::/32\n')
+                    elif line.strip().startswith('monitored_ip_ranges ='):
+                        f.write('# Whitelist of IPs / CIDR ranges to monitor. When set, ONLY traffic matching one\n')
+                        f.write('# of these ranges is treated as local; auto-detected host IPs and external IP are ignored.\n')
+                        f.write('# Leave empty to use auto-detected interface IPs. Comma-separated; accepts bare IPs\n')
+                        f.write('# and CIDRs (/8, /16, /22, /24, etc.) for IPv4 and IPv6.\n')
+                        f.write('# Example: monitored_ip_ranges = 192.168.1.0/24, 10.0.0.0/8, 2001:db8::/32\n')
                     f.write(line)
         except Exception as e:
             print(f"Note: Could not add comment to interface field: {e}")
