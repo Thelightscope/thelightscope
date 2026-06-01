@@ -28,7 +28,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.7.3"
+ls_version = "1.7.4"
 
 print(f"ls_version: {ls_version}")
 
@@ -500,6 +500,26 @@ class Ports:
 
         self.unwanted_packet_count=0
 
+        # Parse optional additional IP ranges/addresses to monitor (comma-separated CIDR or bare IPs)
+        self.additional_ipv4_networks = []
+        self.additional_ipv6_networks = []
+        additional_ranges = config_settings.get('additional_ip_ranges', '').strip()
+        if additional_ranges:
+            for entry in additional_ranges.split(','):
+                entry = entry.strip()
+                if not entry:
+                    continue
+                try:
+                    net = ipaddress.ip_network(entry, strict=False)
+                except ValueError as e:
+                    print(f"WARNING: Invalid additional_ip_ranges entry {entry!r}: {e}")
+                    continue
+                if net.version == 4:
+                    self.additional_ipv4_networks.append(net)
+                else:
+                    self.additional_ipv6_networks.append(net)
+                print(f"Also monitoring additional range/address: {net}")
+
         #self.internal_ip_randomized = [ self.randomize_ip(ip) for ip in internal_ips ]
         
         self.internal_ip_randomized_v4 = [ self.randomize_ip(ip) for ip in self.internal_ips['ipv4'] ]
@@ -645,17 +665,29 @@ class Ports:
     
     
     
+    def _ip_in_additional_ranges(self, ip_str):
+        # Fast bail-out when no additional ranges are configured (the common case)
+        if not self.additional_ipv4_networks and not self.additional_ipv6_networks:
+            return False
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        networks = self.additional_ipv4_networks if ip_obj.version == 4 else self.additional_ipv6_networks
+        for net in networks:
+            if ip_obj in net:
+                return True
+        return False
+
     def is_ip_dst_on_local_network(self,ip_dst):
         if ip_dst in self.internal_ips['ipv4'] or ip_dst in self.internal_ips['ipv6'] or ip_dst==self.external_ip:
             return True
-        else:
-            return False
-        
+        return self._ip_in_additional_ranges(ip_dst)
+
     def is_ip_src_on_local_network(self,ip_src):
         if ip_src in self.internal_ips['ipv4'] or ip_src in self.internal_ips['ipv6'] or ip_src==self.external_ip:
             return True
-        else:
-            return False
+        return self._ip_in_additional_ranges(ip_src)
     
     def add_L2_reachable_host(self,ip,MAC,current_packet):
         if not self.is_ip_dst_on_local_network(ip):
@@ -1872,12 +1904,15 @@ def is_npcap_installed():
                 return False
             
 
-def choose_windows_interface(specific_interface=None):
+def choose_windows_interface(specific_interfaces=None):
     """
     Returns a dict mapping Windows network interfaces to their IP addresses.
-    
+
     Args:
-        specific_interface: If provided, only returns this interface. Otherwise auto-detects all.
+        specific_interfaces: If provided (list of NPF device names), whitelist mode:
+                             ONLY these interfaces are returned, and any missing
+                             interface or one without valid IPs causes a hard exit.
+                             If None, auto-detects all.
     """
     import pcap, wmi, re
     from ipaddress import ip_address
@@ -1905,31 +1940,39 @@ def choose_windows_interface(specific_interface=None):
                 v6.append(ip)
         guid_ip_map[guid] = {'ipv4': v4, 'ipv6': v6}
 
-    # 3) produce final mapping from NPF name → its IP lists
     result = {}
-    
-    # If specific interface is requested, only process that one
-    if specific_interface:
-        if specific_interface not in devs:
-            print(f"WARNING: Specified interface '{specific_interface}' not found in system interfaces!")
-            print(f"Available interfaces: {devs}")
-            return {}
-        
-        devs_to_check = [specific_interface]
-        print(f"Using custom interface from config: {specific_interface}")
-    else:
-        devs_to_check = devs
-    
-    for dev in devs_to_check:
+
+    # Whitelist mode: hard-fail on any bad entry
+    if specific_interfaces:
+        for iface in specific_interfaces:
+            if iface not in devs:
+                print(f"ERROR: Specified interface '{iface}' not found in system interfaces!")
+                print(f"Available interfaces: {devs}")
+                sys.exit(1)
+
+            m = re.search(r'\{([0-9A-Fa-f-]+)\}', iface)
+            if not m:
+                print(f"ERROR: Specified interface '{iface}' has no recognizable GUID; cannot resolve IPs.")
+                sys.exit(1)
+
+            guid = m.group(1).lower()
+            ip_info = guid_ip_map.get(guid, {'ipv4': [], 'ipv6': []})
+            if not (ip_info['ipv4'] or ip_info['ipv6']):
+                print(f"ERROR: Specified interface '{iface}' has no valid IPv4 or IPv6 addresses!")
+                sys.exit(1)
+
+            result[iface] = ip_info
+            print(f"Using custom interface from config: {iface}")
+        return result
+
+    # Auto-detect mode (original behavior)
+    for dev in devs:
         m = re.search(r'\{([0-9A-Fa-f-]+)\}', dev)
         if m:
             guid = m.group(1).lower()
             ip_info = guid_ip_map.get(guid, {'ipv4': [], 'ipv6': []})
-            # Only add if it has valid IPs, or if it's a specific requested interface
-            if ip_info['ipv4'] or ip_info['ipv6'] or specific_interface:
+            if ip_info['ipv4'] or ip_info['ipv6']:
                 result[dev] = ip_info
-            if specific_interface and not (ip_info['ipv4'] or ip_info['ipv6']):
-                print(f"WARNING: Specified interface '{dev}' has no valid IPv4 or IPv6 addresses!")
         else:
             result[dev] = {'ipv4': [], 'ipv6': []}
 
@@ -1982,7 +2025,7 @@ def is_virtual_interface(interface_name):
     
     return False
 
-def choose_mac_linux_interface(specific_interface=None):
+def choose_mac_linux_interface(specific_interfaces=None):
     '''return {'en0':{
           'ipv4': ['10.78.180.31'],
           'ipv6': ['fe80::1434:1d02:bea8:c2c5']
@@ -1990,47 +2033,53 @@ def choose_mac_linux_interface(specific_interface=None):
     """
     Returns a dict mapping each up network interface
     to a dict containing its non-loopback IPv4 and IPv6 addresses.
-    
+
     Args:
-        specific_interface: If provided, only returns this interface. Otherwise auto-detects all.
-    
-    Example return value:
-      {
-        'en0': {
-          'ipv4': ['192.168.1.42'],
-          'ipv6': ['fe80::1234:abcd:5678:9ef0']
-        },
-        'eth0': {
-          'ipv4': ['10.0.0.5'],
-          'ipv6': []
-        },
-        ...
-      }
+        specific_interfaces: If provided (list of interface names), whitelist mode:
+                             ONLY these interfaces are returned, and any missing,
+                             down, or no-IP interface causes a hard exit.
+                             If None, auto-detects all up, non-virtual interfaces.
     """
     stats = psutil.net_if_stats()
     addrs = psutil.net_if_addrs()
     result = {}
 
-    # If specific interface is requested, only process that one
-    if specific_interface:
-        if specific_interface not in stats:
-            print(f"WARNING: Specified interface '{specific_interface}' not found in system interfaces!")
-            print(f"Available interfaces: {list(stats.keys())}")
-            return {}
-        
-        interfaces_to_check = {specific_interface: stats[specific_interface]}
-        print(f"Using custom interface from config: {specific_interface}")
-    else:
-        interfaces_to_check = stats.items()
+    # Whitelist mode: hard-fail on any bad entry
+    if specific_interfaces:
+        for iface in specific_interfaces:
+            if iface not in stats:
+                print(f"ERROR: Specified interface '{iface}' not found in system interfaces!")
+                print(f"Available interfaces: {list(stats.keys())}")
+                sys.exit(1)
+            if not stats[iface].isup:
+                print(f"ERROR: Specified interface '{iface}' is not up!")
+                sys.exit(1)
 
-    for iface, s in interfaces_to_check.items() if isinstance(interfaces_to_check, dict) else interfaces_to_check:
+            ipv4s = [
+                a.address for a in addrs.get(iface, [])
+                if a.family == socket.AF_INET
+                and not a.address.startswith("127.")
+            ]
+            ipv6s = [
+                a.address for a in addrs.get(iface, [])
+                if a.family == socket.AF_INET6
+                and not (a.address == '::1' or a.address.startswith('fe80::1'))
+            ]
+
+            if not (ipv4s or ipv6s):
+                print(f"ERROR: Specified interface '{iface}' has no valid IPv4 or IPv6 addresses!")
+                sys.exit(1)
+
+            result[iface] = {'ipv4': ipv4s, 'ipv6': ipv6s}
+            print(f"Using custom interface from config: {iface}")
+        return result
+
+    # Auto-detect mode (original behavior)
+    for iface, s in stats.items():
         if not s.isup:
-            if specific_interface:
-                print(f"WARNING: Specified interface '{iface}' is not up!")
             continue
 
-        # Skip virtual/container interfaces (only if auto-detecting)
-        if not specific_interface and is_virtual_interface(iface):
+        if is_virtual_interface(iface):
             print(f"Skipping virtual interface: {iface}")
             continue
 
@@ -2050,8 +2099,6 @@ def choose_mac_linux_interface(specific_interface=None):
                 'ipv4': ipv4s,
                 'ipv6': ipv6s
             }
-        elif specific_interface:
-            print(f"WARNING: Specified interface '{iface}' has no valid IPv4 or IPv6 addresses!")
 
     return result
 
@@ -2235,13 +2282,14 @@ def lightscope_run():
             }
 
         # --- initial discovery & spawn ---
-        # Get custom interface from config if specified
-        custom_interface = config_settings.get('interface', '').strip()
-        if custom_interface:
-            print(f"[+] Custom interface specified in config: '{custom_interface}'")
+        # Get custom interface(s) from config if specified (comma-separated whitelist)
+        custom_interfaces_str = config_settings.get('interface', '').strip()
+        custom_interfaces = [x.strip() for x in custom_interfaces_str.split(',') if x.strip()] if custom_interfaces_str else None
+        if custom_interfaces:
+            print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
         else:
             print("[+] No custom interface specified in config - using auto-detection for all interfaces")
-        interfaces_and_ips = choose_mac_linux_interface(custom_interface if custom_interface else None)
+        interfaces_and_ips = choose_mac_linux_interface(custom_interfaces)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
@@ -2369,13 +2417,14 @@ def lightscope_run():
             }
 
         # --- initial discovery & spawn ---
-        # Get custom interface from config if specified
-        custom_interface = config_settings.get('interface', '').strip()
-        if custom_interface:
-            print(f"[+] Custom interface specified in config: '{custom_interface}'")
+        # Get custom interface(s) from config if specified (comma-separated whitelist)
+        custom_interfaces_str = config_settings.get('interface', '').strip()
+        custom_interfaces = [x.strip() for x in custom_interfaces_str.split(',') if x.strip()] if custom_interfaces_str else None
+        if custom_interfaces:
+            print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
         else:
             print("[+] No custom interface specified in config - using auto-detection for all interfaces")
-        interfaces_and_ips = choose_windows_interface(custom_interface if custom_interface else None)
+        interfaces_and_ips = choose_windows_interface(custom_interfaces)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
             print(f"Spawning processes for {iface}: {ips}")
@@ -2430,6 +2479,7 @@ class configuration_reader:
         self.honeypots=""
         self.randomization_key="uninitialized"
         self.interface=""
+        self.additional_ip_ranges=""
         self.initialize_config("config.ini")
         self.load_config(config_file)
         print(f"***SAVE THIS URL:To view your lightscope reports, please visit https://thelightscope.com/light_table/{self.database}")
@@ -2437,7 +2487,8 @@ class configuration_reader:
 
     def get_config(self):
         config={'database':self.database,'self_telnet_and_ssh_honeypot_ports_to_forward':self.self_telnet_and_ssh_honeypot_ports_to_forward,
-        'autoupdate':self.autoupdate,'honeypots':self.honeypots,'randomization_key':self.randomization_key,'interface':self.interface}
+        'autoupdate':self.autoupdate,'honeypots':self.honeypots,'randomization_key':self.randomization_key,'interface':self.interface,
+        'additional_ip_ranges':self.additional_ip_ranges}
         return config
 
     
@@ -2453,6 +2504,7 @@ class configuration_reader:
             self.honeypots=config.get('Settings', 'honeypots', fallback='yes').lower().strip()
             self.self_telnet_and_ssh_honeypot_ports_to_forward=config.get('Settings', 'self_telnet_and_ssh_honeypot_ports_to_forward', fallback=[])
             self.interface=config.get('Settings', 'interface', fallback="").strip()
+            self.additional_ip_ranges=config.get('Settings', 'additional_ip_ranges', fallback="").strip()
 
 
 
@@ -2537,6 +2589,11 @@ class configuration_reader:
             config['Settings']['interface'] = ""
             print(f"interface not found; set to empty (auto-detection enabled)")
 
+        # Check for the 'additional_ip_ranges' option.
+        if 'additional_ip_ranges' not in config['Settings']:
+            config['Settings']['additional_ip_ranges'] = ""
+            print(f"additional_ip_ranges not found; set to empty (none monitored beyond auto-detected IPs)")
+
 
         # Write the configuration back to the file.
         with open(config_file, 'w') as f:
@@ -2550,7 +2607,13 @@ class configuration_reader:
             with open(config_file, 'w') as f:
                 for line in lines:
                     if line.strip().startswith('interface ='):
-                        f.write('# Custom interface to monitor (leave empty for auto-detection)\n')
+                        f.write('# Custom interface(s) to monitor as a whitelist (comma-separated; leave empty for auto-detection).\n')
+                        f.write('# Any listed interface that is missing, down, or has no valid IPs will cause lightscope to exit.\n')
+                        f.write('# Example: interface = en0, en5\n')
+                    elif line.strip().startswith('additional_ip_ranges ='):
+                        f.write('# Additional IPs / CIDR ranges to monitor in addition to auto-detected host IPs.\n')
+                        f.write('# Comma-separated. Accepts bare IPs and CIDRs (/8, /16, /22, /24, etc.) for IPv4 and IPv6.\n')
+                        f.write('# Example: additional_ip_ranges = 192.168.1.0/24, 10.0.0.0/8, 2001:db8::/32\n')
                     f.write(line)
         except Exception as e:
             print(f"Note: Could not add comment to interface field: {e}")
