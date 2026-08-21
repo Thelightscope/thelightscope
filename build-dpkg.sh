@@ -71,15 +71,29 @@ else
     echo "Warning: python-libpcap directory not found"
 fi
 
-# If LIGHTSCOPE_NO_HONEYPOT is set, default honeypots to disabled in config template
+# Explicitly set the honeypot default in the (throwaway) build copy of the postinst
+# config template. Always set it rather than only flipping yes->no so the result
+# never depends on whatever the template currently says.
 if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
-    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: setting honeypots = no in postinst config template"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' 's/^honeypots = yes/honeypots = no/' "$BUILD_DIR/DEBIAN/postinst"
-    else
-        sed -i 's/^honeypots = yes/honeypots = no/' "$BUILD_DIR/DEBIAN/postinst"
-    fi
+    HONEYPOT_DEFAULT="no"
+    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: building no-honeypot package"
+else
+    HONEYPOT_DEFAULT="yes"
+    echo "Building standard package (honeypots enabled)"
 fi
+for f in "$BUILD_DIR/DEBIAN/postinst" "$BUILD_DIR/usr/share/lightscope/config.ini.example"; do
+    [ -f "$f" ] || continue
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/^honeypots = .*/honeypots = $HONEYPOT_DEFAULT/" "$f"
+    else
+        sed -i "s/^honeypots = .*/honeypots = $HONEYPOT_DEFAULT/" "$f"
+    fi
+done
+if ! grep -q "^honeypots = $HONEYPOT_DEFAULT\$" "$BUILD_DIR/DEBIAN/postinst"; then
+    echo "ERROR: postinst config template does not set honeypots = $HONEYPOT_DEFAULT"
+    exit 1
+fi
+echo "Verified: postinst config template sets honeypots = $HONEYPOT_DEFAULT"
 
 # Update version in control file
 # Handle macOS vs Linux sed differences

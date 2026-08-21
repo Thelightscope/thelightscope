@@ -63,25 +63,53 @@ if [ "$BUILT_VERSION" != "$VERSION" ]; then
     exit 1
 fi
 
-# Update version in spec file
-# Handle macOS vs Linux sed differences
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS requires backup extension
-    sed -i '' "s/Version:.*/Version: $VERSION/" "$RPM_BUILD_DIR/SPECS/lightscope.spec"
-else
-    # Linux sed
-    sed -i "s/Version:.*/Version: $VERSION/" "$RPM_BUILD_DIR/SPECS/lightscope.spec"
+# sed -i wrapper: macOS sed requires an explicit (empty) backup suffix
+sedi() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
+SPEC_SRC="$RPM_BUILD_DIR/SPECS/lightscope.spec"
+BUILD_SPEC="$RPM_BUILD_DIR/SPECS/lightscope-build.spec"
+
+# Update version in the tracked spec file (idempotent)
+sedi "s/Version:.*/Version: $VERSION/" "$SPEC_SRC"
+
+# The tracked spec is the canonical source and must always default to
+# honeypots = yes. Older versions of this script flipped it to "no" IN PLACE
+# for the no-honeypot build and never restored it, so every later "standard"
+# build on that machine silently shipped with honeypots disabled. Repair it
+# here if a previous run left it mutated.
+if grep -q '^honeypots = no' "$SPEC_SRC"; then
+    echo "WARNING: tracked spec had 'honeypots = no' left over from a previous no-honeypot build - restoring 'honeypots = yes'"
+    sedi 's/^honeypots = .*/honeypots = yes/' "$SPEC_SRC"
 fi
 
-# If LIGHTSCOPE_NO_HONEYPOT is set, default honeypots to disabled in spec config templates
+# Build from a throwaway copy of the spec so per-build changes never touch the tracked file
+cp "$SPEC_SRC" "$BUILD_SPEC"
+trap 'rm -f "$BUILD_SPEC"' EXIT
+
+# Explicitly set the honeypot default for this build (never rely on the current file contents)
 if [ "${LIGHTSCOPE_NO_HONEYPOT:-0}" = "1" ]; then
-    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: setting honeypots = no in spec config templates"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' 's/^honeypots = yes/honeypots = no/' "$RPM_BUILD_DIR/SPECS/lightscope.spec"
-    else
-        sed -i 's/^honeypots = yes/honeypots = no/' "$RPM_BUILD_DIR/SPECS/lightscope.spec"
-    fi
+    HONEYPOT_DEFAULT="no"
+    echo "LIGHTSCOPE_NO_HONEYPOT=1 detected: building no-honeypot package"
+else
+    HONEYPOT_DEFAULT="yes"
+    echo "Building standard package (honeypots enabled)"
 fi
+sedi "s/^honeypots = .*/honeypots = $HONEYPOT_DEFAULT/" "$BUILD_SPEC"
+
+# Verify every honeypots line in the build spec (config.ini.example and the %post template) matches
+HP_LINES=$(grep -c '^honeypots = ' "$BUILD_SPEC" || true)
+HP_OK=$(grep -c "^honeypots = $HONEYPOT_DEFAULT\$" "$BUILD_SPEC" || true)
+if [ "$HP_LINES" -eq 0 ] || [ "$HP_LINES" -ne "$HP_OK" ]; then
+    echo "ERROR: build spec does not have honeypots = $HONEYPOT_DEFAULT on all $HP_LINES 'honeypots =' lines (matched: $HP_OK)"
+    exit 1
+fi
+echo "Verified: $HP_OK/$HP_LINES config template(s) in build spec set honeypots = $HONEYPOT_DEFAULT"
 
 # Build the RPM
 echo "Creating RPM package..."
@@ -95,7 +123,7 @@ rpmbuild --define "_topdir $RPM_BUILD_DIR" \
          --define "_build_os linux" \
          --define "_target_os linux" \
          --define "_buildhost linux-builder" \
-         -bb "$RPM_BUILD_DIR/SPECS/lightscope.spec"
+         -bb "$BUILD_SPEC"
 
 # Find the actual RPM file that was created (it may include dist tag like .el10, .fc39, etc.)
 ACTUAL_RPM=$(find "$RPM_BUILD_DIR/RPMS/noarch/" -name "${PACKAGE_NAME}-${VERSION}-*.noarch.rpm" | head -1)

@@ -11,3 +11,6 @@ __pycache__/
 # Build artifacts
 dist/
 build/
+
+# RPM build temp spec
+rpm-build/SPECS/lightscope-build.spec
