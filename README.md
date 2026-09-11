@@ -1,8 +1,7 @@
 # LightScope
 
-Please visit [LightScope.org](https://lightscope.org) for more information
+Please visit [LightScope.org](https://lightscope.org) for more information and to download our datasets!
 
-**See Your Scanners**
 
 <p align="center">
   <img src="ls.png" alt="LightScope" width="128">
