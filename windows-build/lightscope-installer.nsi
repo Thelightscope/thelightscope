@@ -420,7 +420,7 @@ Section "Core Files" SEC01
   ; Install core dependencies
   DetailPrint "Installing core Python packages..."
   FileWrite $9 "Installing core dependencies...$\r$\n"
-  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 scapy pywin32 pystray Pillow'
+  nsExec::ExecToLog '"$2" install --upgrade cryptography psutil requests dpkt packaging urllib3 pywin32 pystray Pillow'
   Pop $0
   FileWrite $9 "Core dependencies install exit code: $0$\r$\n"
   

@@ -129,7 +129,6 @@ def main():
         "dpkt",
         "packaging",
         "urllib3",
-        "scapy",
         "pywin32",  # Critical for Windows COM functionality
         "wmi",      # Windows Management Instrumentation
         "pcap-ct==1.3.0b3",  # Specific version for packet capture

@@ -15,7 +15,6 @@ urllib3==2.2.3
 packaging
 
 # Network packet analysis
-scapy==2.6.1
 dpkt==1.9.8
 
 # Container and systemd integration

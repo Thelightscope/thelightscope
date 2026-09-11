@@ -117,7 +117,6 @@ python-libpcap==0.5.2
 requests==2.32.3
 urllib3==2.2.3
 packaging
-scapy==2.6.1
 dpkt==1.9.8
 systemd-python
 cryptography

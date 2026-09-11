@@ -25,7 +25,7 @@ COPY python-libpcap /opt/lightscope/python-libpcap
 # Create and setup virtual environment
 RUN python3 -m venv /opt/lightscope/venv && \
     /opt/lightscope/venv/bin/pip install --upgrade pip && \
-    /opt/lightscope/venv/bin/pip install dpkt psutil requests cryptography packaging scapy && \
+    /opt/lightscope/venv/bin/pip install dpkt psutil requests cryptography packaging && \
     cd /opt/lightscope/python-libpcap && /opt/lightscope/venv/bin/pip install .
 
 # Copy application files
