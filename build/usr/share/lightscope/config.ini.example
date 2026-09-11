@@ -19,7 +19,7 @@ debug_logging = no
 
 # Enable honeypot functionality (yes/no)
 # Set to 'no' to disable honeypot port opening and forwarding
-honeypots = yes
+honeypots = no
 
 # Custom interface to monitor (leave empty for auto-detection)
 interface =
