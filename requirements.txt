@@ -22,10 +22,3 @@ systemd-python>=235
 
 # Cryptography for secure updates
 cryptography>=3.4.8
-
-# Configuration file parsing
-configparser
-
-# Additional utilities for containers
-python-dateutil
-pytz
