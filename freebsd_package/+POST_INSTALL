@@ -1,0 +1,123 @@
+#!/bin/sh
+# LightScope post-install: runtime directories, config.ini with a generated
+# database name, and service enable/start.
+#
+#   LIGHTSCOPE_NO_AUTOSTART=1   do not enable or start the service
+set -e
+
+PREFIX="${PKG_PREFIX:-@PREFIX@}"
+LS_USER="lightscope"
+LS_GROUP="lightscope"
+LS_HOME="${PREFIX}/lightscope"
+PYTHON="@PYTHON@"
+PYVER="@PYVER@"
+HONEYPOT_DEFAULT="@HONEYPOT_DEFAULT@"
+CONFIG="${LS_HOME}/config.ini"
+
+echo "Setting up LightScope..."
+
+install -d -o "${LS_USER}" -g "${LS_GROUP}" -m 0755 \
+	"${LS_HOME}" "${LS_HOME}/bin" "${LS_HOME}/config" "${LS_HOME}/logs" "${LS_HOME}/updates" \
+	/var/log/lightscope /var/run/lightscope
+chown -R "${LS_USER}:${LS_GROUP}" "${LS_HOME}"
+chmod 0755 "${LS_HOME}/bin/lightscope-runner.py"
+
+# ---- database name -----------------------------------------------------------
+# Same scheme as the Debian/RPM installers. An existing config.ini is left
+# alone so upgrades and reinstalls keep the same dashboard URL.
+if [ -f "${CONFIG}" ]; then
+	DB_NAME=$(sed -n 's/^database[[:space:]]*=[[:space:]]*//p' "${CONFIG}" | head -1)
+	echo "Keeping existing ${CONFIG}"
+else
+	TODAY=$(date +%Y%m%d)
+	if [ -f /tmp/.greynoise ] || [ -f "${LS_HOME}/.greynoise" ] || [ -f /root/.greynoise ]; then
+		# GreyNoise mode: gn + date + 45 random chars (56 total)
+		RAND_PART=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 45)
+		DB_NAME="gn${TODAY}_${RAND_PART}"
+	else
+		# Standard: date + 47 random chars (56 total)
+		RAND_PART=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 47)
+		DB_NAME="${TODAY}_${RAND_PART}"
+	fi
+
+	cat > "${CONFIG}" <<EOF
+[Settings]
+# Database name for storing LightScope data (auto-generated during installation)
+database = ${DB_NAME}
+
+# Randomization key for IP address anonymization (auto-generated if empty)
+randomization_key = 
+
+# Enable automatic SSH/Telnet honeypot port forwarding (yes/no)
+self_telnet_and_ssh_honeypot_ports_to_forward = no
+
+# Enable automatic updates (yes/no)
+autoupdate = yes
+
+# Update check interval in hours (minimum 1 hour)
+update_check_interval = 24
+
+# Enable debug logging (yes/no)
+debug_logging = no
+
+# Enable honeypot functionality (yes/no)
+# Set to 'no' to disable honeypot port opening and forwarding
+honeypots = ${HONEYPOT_DEFAULT}
+
+# Custom interface(s) to monitor, comma-separated (leave empty for auto-detection)
+# FreeBSD examples: em0  or  igb0,vtnet0
+interface =
+
+# Maximum number of concurrent honeypot ports
+max_honeypot_ports = 10
+
+# Honeypot rotation interval in hours
+honeypot_rotation_interval = 4
+EOF
+	chown "${LS_USER}:${LS_GROUP}" "${CONFIG}"
+	chmod 0644 "${CONFIG}"
+	echo "Created ${CONFIG}"
+fi
+
+# ---- sanity check the Python runtime -------------------------------------------
+if [ ! -x "${PYTHON}" ]; then
+	echo "WARNING: ${PYTHON} not found. Install python${PYVER} or set lightscope_python in /etc/rc.conf."
+elif ! "${PYTHON}" -c "import dpkt, psutil, requests, cryptography, packaging, pcap" >/dev/null 2>&1; then
+	echo "WARNING: a required Python module is missing for ${PYTHON}. Install:"
+	echo "  pkg install py${PYVER}-dpkt py${PYVER}-psutil py${PYVER}-requests py${PYVER}-cryptography py${PYVER}-packaging py${PYVER}-pypcap"
+fi
+
+# ---- service ---------------------------------------------------------------------
+if [ -z "${LIGHTSCOPE_NO_AUTOSTART:-}" ]; then
+	sysrc -q lightscope_enable=YES >/dev/null
+	if service lightscope onestatus >/dev/null 2>&1; then
+		echo "Restarting LightScope service..."
+		service lightscope restart || echo "WARNING: could not restart lightscope; try: service lightscope restart"
+	else
+		echo "Starting LightScope service..."
+		service lightscope start || echo "WARNING: could not start lightscope; try: service lightscope start"
+	fi
+else
+	echo "LIGHTSCOPE_NO_AUTOSTART set: service not enabled. To enable later:"
+	echo "  sysrc lightscope_enable=YES && service lightscope start"
+fi
+
+cat <<EOF
+
+==============================================
+ LIGHTSCOPE DASHBOARD ACCESS
+==============================================
+ Database name: ${DB_NAME}
+ Dashboard URL: https://thelightscope.com/light_table/${DB_NAME}
+
+ Configuration: ${CONFIG}
+ Service log:   /var/log/lightscope/lightscope.log
+ Runner log:    ${LS_HOME}/logs/lightscope-runner.log
+
+ Status:  service lightscope status
+ Stop:    service lightscope stop
+ Start:   service lightscope start
+==============================================
+EOF
+
+exit 0

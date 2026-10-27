@@ -2,6 +2,7 @@
 import argparse
 import configparser
 import datetime
+import errno
 import hashlib
 import ipaddress
 import json
@@ -28,7 +29,7 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.7.8"
+ls_version = "1.8.0"
 
 print(f"ls_version: {ls_version}")
 
@@ -1645,11 +1646,82 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
 
 
                 
+# BPF filter installed in the kernel on every capture backend.
+#todo "ip" is IPv4 only; the parsers also understand IPv6 TCP
+CAPTURE_BPF_FILTER = "ip and tcp"
+
+
+def open_capture(network_interface, promisc_mode=False, snaplen=256):
+    """
+    Open a live capture on ``network_interface`` using whichever pcap binding
+    is installed. ``CAPTURE_BPF_FILTER`` is applied on both backends.
+
+    Returns ``(frames, datalink, backend)``:
+      frames    iterator of raw link-layer frames (bytes). The pylibpcap backend
+                also yields b"" on read timeouts, exactly as before; the parsers
+                reject those and the reader loop moves on.
+      datalink  pcap DLT_* value of the handle when the backend can report it,
+                otherwise None.
+      backend   "pylibpcap" or "pypcap".
+
+    Backends, in order of preference:
+      1. pylibpcap - the vendored python-libpcap Cython binding used by the
+                     Linux, macOS and Docker builds.
+      2. pypcap    - the ``pcap`` module (FreeBSD: net/py-pypcap, package
+                     py3XX-pypcap). Used when pylibpcap is not installed.
+    """
+    try:
+        import pylibpcap.base
+    except ImportError:
+        pylibpcap = None
+
+    if pylibpcap is not None:
+        sniffobj = pylibpcap.base.Sniff(
+            network_interface,
+            count=-1,
+            promisc=int(promisc_mode),
+            #todo may need to allow ARP again if discovering
+            filters=CAPTURE_BPF_FILTER,
+            buffer_size=1 << 20,
+            snaplen=snaplen
+        )
+
+        def _pylibpcap_frames():
+            for plen, ts, buf in sniffobj.capture():
+                yield buf
+
+        return _pylibpcap_frames(), None, "pylibpcap"
+
+    try:
+        import pcap
+    except ImportError:
+        raise RuntimeError(
+            "no packet capture backend found: install the vendored python-libpcap "
+            "or pypcap (FreeBSD: pkg install py3XX-pypcap)"
+        )
+
+    sniffer = pcap.pcap(
+        name=network_interface,
+        snaplen=snaplen,
+        promisc=bool(promisc_mode),
+        timeout_ms=100,
+        immediate=True
+    )
+    datalink = sniffer.datalink()
+    if datalink == dpkt.pcap.DLT_EN10MB:
+        sniffer.setfilter(CAPTURE_BPF_FILTER)
+
+    def _pypcap_frames():
+        for ts, buf in sniffer:
+            yield buf
+
+    return _pypcap_frames(), datalink, "pypcap"
+
+
 def read_from_interface_mac_linux(network_interface,
                         unprocessed_packets,         # duplex Pipe
                         promisc_mode=False):
 
-    import pylibpcap.base
     BATCH_SIZE      = 280
     IDLE_FLUSH_SECS = 1.0
     SLEEP_DELAY     = 0.001  # 1ms when no flush condition met
@@ -1711,22 +1783,22 @@ def read_from_interface_mac_linux(network_interface,
 
     # --------------------------- sniffer init ----------------------------
     try:
-        sniffobj = pylibpcap.base.Sniff(
-            network_interface,
-            count=-1,
-            promisc=int(promisc_mode),
-            #todo may need to allow ARP again if discovering
-            filter="ip and tcp",
-            buffer_size=1 << 20,
-            snaplen=256
-        )
+        frames, datalink, backend = open_capture(network_interface, promisc_mode)
     except Exception as e:
         ###print(f"ERROR initializing capture: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # The parsers only understand Ethernet (DLT_EN10MB) frames. Tunnel and
+    # point-to-point interfaces (wg, tun, gif, lo0 on BSD, ...) use other link
+    # types; capturing them would only burn CPU rejecting every frame.
+    if datalink is not None and datalink != dpkt.pcap.DLT_EN10MB:
+        print(f"read_from_interface_mac_linux: not capturing on {network_interface}: "
+              f"datalink {datalink} is not Ethernet ({backend})", flush=True)
+        return
+
     # --------------------------- capture loop ---------------------------
     packet_number = 0
-    for plen, ts, buf in sniffobj.capture():
+    for buf in frames:
         packet_number += 1
         try:
             try:
@@ -2016,6 +2088,14 @@ def is_virtual_interface(interface_name):
         'qvb',         # OpenStack quantum veth bridge-side
         'qvo',         # OpenStack quantum veth ovs-side
         'tun',         # TUN devices (VPN/virtualization)
+        'wg',          # WireGuard (not Ethernet-framed; Linux and FreeBSD)
+        'epair',       # FreeBSD jail vnet pairs
+        'pflog',       # FreeBSD pf logging pseudo-interface
+        'pfsync',      # FreeBSD pf state synchronisation
+        'enc',         # FreeBSD IPsec pseudo-interface
+        'gif',         # FreeBSD generic tunnel
+        'gre',         # GRE tunnel
+        'ipfw',        # FreeBSD ipfw logging pseudo-interface
     ]
     
     # Check if interface name starts with any virtual pattern
@@ -2535,7 +2615,8 @@ class configuration_reader:
             today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
             
             # Check if GreyNoise mode is enabled by presence of .greynoise file
-            greynoise_paths = ["/tmp/.greynoise", "/opt/lightscope/.greynoise", 
+            greynoise_paths = ["/tmp/.greynoise", "/opt/lightscope/.greynoise",
+                             os.path.join(os.environ.get("LIGHTSCOPE_HOME", "/opt/lightscope"), ".greynoise"),
                              os.path.expanduser("~/.greynoise")]
             is_greynoise = any(os.path.exists(path) for path in greynoise_paths)
             
@@ -2728,12 +2809,12 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                     return s, port
                     
                 except OSError as e:
-                    if e.errno == 98:  # EADDRINUSE - Address already in use
+                    if e.errno == errno.EADDRINUSE:  # Address already in use (98 on Linux, 48 on BSD/macOS)
                         if attempt == 0:  # Only log for the first (desired) port
                             ###print(f"_honeypot_worker: Port {port} already in use, trying alternatives...", flush=True)
                             pass
                         continue
-                    elif e.errno == 13:  # EACCES - Permission denied  
+                    elif e.errno == errno.EACCES:  # Permission denied  
                         if port < 1024:
                             ###print(f"_honeypot_worker: Port {port} < 1024 requires root privileges", flush=True)
                             continue

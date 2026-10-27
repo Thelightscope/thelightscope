@@ -14,3 +14,6 @@ build/
 
 # RPM build temp spec
 rpm-build/SPECS/lightscope-build.spec
+
+# FreeBSD package build
+build-freebsd/

@@ -1,0 +1,17 @@
+# Persistent alternative to the chmod the lightscope rc script does on every
+# start. Only needed if you prefer devfs(8) rules, e.g. because you already
+# restart devfs at runtime.
+#
+# 1. Append this ruleset to /etc/devfs.rules (choose a number not already used):
+#
+[lightscope=10]
+add path 'bpf*' mode 0660 group lightscope
+#
+# 2. Activate it:
+#      sysrc devfs_system_ruleset=lightscope
+#      service devfs restart
+#    If you already have a system ruleset, add the 'add path' line to that one
+#    instead of creating a new ruleset.
+#
+# 3. Tell the rc script to leave /dev/bpf alone:
+#      sysrc lightscope_bpf_chmod=NO

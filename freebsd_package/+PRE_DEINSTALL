@@ -1,0 +1,8 @@
+#!/bin/sh
+# LightScope pre-deinstall: stop the service before its files are removed.
+# 'onestop' works whether or not lightscope_enable is set in rc.conf.
+if [ -f /var/run/lightscope/lightscope.pid ]; then
+	echo "Stopping LightScope service..."
+	service lightscope onestop >/dev/null 2>&1 || true
+fi
+exit 0

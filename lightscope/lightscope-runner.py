@@ -33,28 +33,39 @@ except ImportError:
     # Note: logger not yet defined, will log this later
 
 # Configuration
-# Detect if running on macOS in app bundle or Linux
-if Path("/Applications/LightScope.app/Contents/Resources").exists():
-    # macOS app bundle
-    LIGHTSCOPE_HOME = Path("/Applications/LightScope.app/Contents/Resources")
-    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
-    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
-    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
-    BIN_DIR = LIGHTSCOPE_HOME / "bin"
-else:
-    # Linux/standard installation
-    LIGHTSCOPE_HOME = Path("/opt/lightscope")
-    CONFIG_DIR = LIGHTSCOPE_HOME / "config"
-    UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
-    LOGS_DIR = LIGHTSCOPE_HOME / "logs"
-    BIN_DIR = LIGHTSCOPE_HOME / "bin"
+# Install root, in priority order:
+#   1. LIGHTSCOPE_HOME environment variable (set by the FreeBSD rc script; also handy for Docker)
+#   2. FreeBSD package default, /usr/local/lightscope (hier(7)); FreeBSD only
+#   3. macOS app bundle
+#   4. Linux/standard installation, /opt/lightscope
+def _detect_lightscope_home():
+    env_home = os.environ.get("LIGHTSCOPE_HOME", "").strip()
+    if env_home:
+        return Path(env_home)
+    if sys.platform.startswith("freebsd") and Path("/usr/local/lightscope").exists():
+        return Path("/usr/local/lightscope")
+    if Path("/Applications/LightScope.app/Contents/Resources").exists():
+        return Path("/Applications/LightScope.app/Contents/Resources")
+    return Path("/opt/lightscope")
 
-runner_version = "1.2.0"
+LIGHTSCOPE_HOME = _detect_lightscope_home()
+CONFIG_DIR = LIGHTSCOPE_HOME / "config"
+UPDATES_DIR = LIGHTSCOPE_HOME / "updates"
+LOGS_DIR = LIGHTSCOPE_HOME / "logs"
+BIN_DIR = LIGHTSCOPE_HOME / "bin"
+
+runner_version = "1.3.0"
 
 print(f"runner_version: {runner_version}")
 
 UPDATE_CHECK_URL = "https://thelightscope.com/latest/version"
 DOWNLOAD_URL_BASE = "https://thelightscope.com/latest"
+
+# Make sure the log directory exists before the file handler opens it
+try:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 
 # Setup logging
 logging.basicConfig(
@@ -307,7 +318,7 @@ def ensure_directories():
 
 def is_autoupdate_disabled():
     """Check if autoupdate is explicitly disabled in config.ini. Returns True if disabled, False otherwise."""
-    config_path = Path("/opt/lightscope/config.ini")
+    config_path = LIGHTSCOPE_HOME / "config.ini"
     try:
         if config_path.exists():
             config = configparser.ConfigParser()

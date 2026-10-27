@@ -1,0 +1,22 @@
+#!/bin/sh
+# LightScope pre-install: create the service user and group before the package
+# files are extracted, so pkg can install them with the right ownership.
+set -e
+
+PREFIX="${PKG_PREFIX:-@PREFIX@}"
+LS_USER="lightscope"
+LS_GROUP="lightscope"
+LS_HOME="${PREFIX}/lightscope"
+
+if ! pw groupshow "${LS_GROUP}" >/dev/null 2>&1; then
+	echo "Creating group ${LS_GROUP}"
+	pw groupadd "${LS_GROUP}"
+fi
+
+if ! pw usershow "${LS_USER}" >/dev/null 2>&1; then
+	echo "Creating user ${LS_USER}"
+	pw useradd "${LS_USER}" -g "${LS_GROUP}" -c "LightScope daemon" \
+		-d "${LS_HOME}" -s /usr/sbin/nologin -w no
+fi
+
+exit 0

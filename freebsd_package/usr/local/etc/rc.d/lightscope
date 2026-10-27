@@ -1,0 +1,102 @@
+#!/bin/sh
+#
+# PROVIDE: lightscope
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# LightScope network security monitor (https://thelightscope.com).
+#
+# Add the following lines to /etc/rc.conf (or use sysrc) to control lightscope:
+#
+# lightscope_enable (bool):     Set to "YES" to start lightscope at boot.
+#                               Default: "NO"
+# lightscope_user (str):        User to run as. Default: "lightscope".
+#                               Set to "root" if you would rather not grant the
+#                               service group access to /dev/bpf.
+# lightscope_group (str):       Group to run as. Default: "lightscope"
+# lightscope_home (str):        Install root. Default: "/usr/local/lightscope"
+# lightscope_python (str):      Python interpreter. Default: "@PYTHON@"
+# lightscope_logfile (str):     Combined stdout/stderr of the service.
+#                               Default: "/var/log/lightscope/lightscope.log"
+# lightscope_bpf_chmod (bool):  On every start, give lightscope_group read/write
+#                               access to /dev/bpf (packet capture). Default: "YES".
+#                               Set to "NO" if you manage this with a devfs(8)
+#                               ruleset instead; see
+#                               /usr/local/share/lightscope/devfs.rules.sample
+#
+
+. /etc/rc.subr
+
+name="lightscope"
+rcvar="lightscope_enable"
+desc="LightScope network security monitor"
+
+load_rc_config $name
+
+: ${lightscope_enable:="NO"}
+: ${lightscope_user:="lightscope"}
+: ${lightscope_group:="lightscope"}
+: ${lightscope_home:="/usr/local/lightscope"}
+: ${lightscope_python:="@PYTHON@"}
+: ${lightscope_logfile:="/var/log/lightscope/lightscope.log"}
+: ${lightscope_bpf_chmod:="YES"}
+
+runtime_dir="/var/run/${name}"
+pidfile="${runtime_dir}/${name}.pid"
+child_pidfile="${runtime_dir}/${name}.child.pid"
+
+# The core reads config.ini relative to its working directory.
+lightscope_chdir="${lightscope_home}"
+lightscope_env="LIGHTSCOPE_HOME=${lightscope_home} HOME=${lightscope_home} PYTHONPATH=${lightscope_home}/bin PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1"
+
+# daemon(8) supervises the runner (the FreeBSD stand-in for the systemd unit):
+#   -r/-R   restart the runner if it exits, after 10 seconds
+#   -o      capture stdout/stderr to the log file
+#   -H      reopen the log file on SIGHUP (newsyslog rotation)
+#   -u      drop privileges to the service user
+#   -P/-p   supervisor and child pid files
+command="/usr/sbin/daemon"
+command_args="-f -r -R 10 -H -t ${name} -P ${pidfile} -p ${child_pidfile} -u ${lightscope_user} -o ${lightscope_logfile} ${lightscope_python} -u ${lightscope_home}/bin/lightscope-runner.py"
+
+start_precmd="${name}_prestart"
+stop_postcmd="${name}_poststop"
+
+lightscope_prestart()
+{
+	if [ ! -x "${lightscope_python}" ]; then
+		err 1 "${lightscope_python} not found; set lightscope_python in /etc/rc.conf"
+	fi
+	if [ ! -f "${lightscope_home}/bin/lightscope-runner.py" ]; then
+		err 1 "${lightscope_home}/bin/lightscope-runner.py not found"
+	fi
+
+	install -d -o "${lightscope_user}" -g "${lightscope_group}" -m 0755 \
+		"${runtime_dir}" "$(dirname "${lightscope_logfile}")" \
+		"${lightscope_home}/logs" "${lightscope_home}/updates"
+
+	if [ ! -f "${lightscope_home}/config.ini" ]; then
+		warn "${lightscope_home}/config.ini missing; creating it from the sample"
+		install -o "${lightscope_user}" -g "${lightscope_group}" -m 0644 \
+			/usr/local/share/lightscope/config.ini.sample "${lightscope_home}/config.ini"
+	fi
+
+	# Packet capture opens the BPF cloning device. FreeBSD has no Linux-style
+	# capabilities, so give the service group access to /dev/bpf instead.
+	# devfs node permissions last until reboot, hence doing it on every start.
+	if [ "${lightscope_user}" != "root" ] && checkyesno lightscope_bpf_chmod; then
+		if [ -c /dev/bpf ]; then
+			chgrp "${lightscope_group}" /dev/bpf && chmod 0660 /dev/bpf
+		else
+			warn "/dev/bpf not found; packet capture will fail"
+		fi
+	fi
+
+	return 0
+}
+
+lightscope_poststop()
+{
+	rm -f "${child_pidfile}"
+}
+
+run_rc_command "$1"

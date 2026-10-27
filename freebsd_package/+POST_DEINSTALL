@@ -1,0 +1,38 @@
+#!/bin/sh
+# LightScope post-deinstall.
+#
+# Package files are gone. config.ini (which holds the database name), logs,
+# the service user and lightscope_enable in rc.conf are kept, so a reinstall
+# or upgrade keeps the same dashboard URL. To remove everything:
+#
+#   env LIGHTSCOPE_PURGE=1 pkg delete lightscope
+#
+PREFIX="${PKG_PREFIX:-@PREFIX@}"
+LS_HOME="${PREFIX}/lightscope"
+
+# Remove stale pid files only; never touch a live service (e.g. during pkg upgrade).
+for f in /var/run/lightscope/lightscope.pid /var/run/lightscope/lightscope.child.pid; do
+	if [ -f "$f" ] && ! kill -0 "$(cat "$f" 2>/dev/null)" 2>/dev/null; then
+		rm -f "$f"
+	fi
+done
+
+if [ "${LIGHTSCOPE_PURGE:-0}" = "1" ]; then
+	echo "LIGHTSCOPE_PURGE=1: removing data, logs, user and rc.conf entry..."
+	sysrc -x lightscope_enable >/dev/null 2>&1 || true
+	rm -rf "${LS_HOME}" /var/log/lightscope /var/run/lightscope
+	pw userdel lightscope >/dev/null 2>&1 || true
+	pw groupdel lightscope >/dev/null 2>&1 || true
+	echo "LightScope completely removed."
+else
+	cat <<EOF
+LightScope package files removed. Kept so a reinstall keeps its dashboard URL:
+  ${LS_HOME} (config.ini, logs, update backups), /var/log/lightscope,
+  the 'lightscope' user/group, and lightscope_enable in /etc/rc.conf.
+To remove those as well:
+  sysrc -x lightscope_enable
+  rm -rf ${LS_HOME} /var/log/lightscope /var/run/lightscope
+  pw userdel lightscope && pw groupdel lightscope
+EOF
+fi
+exit 0

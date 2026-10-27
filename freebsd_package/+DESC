@@ -1,0 +1,9 @@
+LightScope is a network security monitoring solution that detects unwanted
+network traffic and provides honeypot capabilities. It monitors network
+interfaces for suspicious activity and reports findings to the LightScope
+cloud platform.
+
+The service runs as the unprivileged 'lightscope' user under daemon(8) and
+updates its own core with signed releases from thelightscope.com.
+
+WWW: https://thelightscope.com

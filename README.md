@@ -8,7 +8,7 @@ Please visit [LightScope.org](https://lightscope.org) for more information and t
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker%20%7C%20OPNsense-lightgrey.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker%20%7C%20FreeBSD%20%7C%20OPNsense-lightgrey.svg)]()
 
 
 
