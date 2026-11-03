@@ -1651,6 +1651,31 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
 CAPTURE_BPF_FILTER = "ip and tcp"
 
 
+def _open_capture_pcapy(network_interface, promisc_mode, snaplen):
+    """pcapy backend for open_capture() (Debian package python3-pcapy)."""
+    try:
+        import pcapy
+    except ImportError:
+        raise RuntimeError(
+            "no packet capture backend found: install the vendored python-libpcap, "
+            "pypcap (FreeBSD: pkg install py3XX-pypcap) or pcapy "
+            "(Debian: apt install python3-pcapy)"
+        )
+
+    reader = pcapy.open_live(network_interface, snaplen, int(promisc_mode), 100)
+    datalink = reader.datalink()
+    if datalink == dpkt.pcap.DLT_EN10MB:
+        reader.setfilter(CAPTURE_BPF_FILTER)
+
+    def _pcapy_frames():
+        while True:
+            # (None, b"") on read timeout; the parsers reject b"" and the loop moves on
+            _hdr, buf = reader.next()
+            yield buf
+
+    return _pcapy_frames(), datalink, "pcapy"
+
+
 def open_capture(network_interface, promisc_mode=False, snaplen=256):
     """
     Open a live capture on ``network_interface`` using whichever pcap binding
@@ -1662,13 +1687,16 @@ def open_capture(network_interface, promisc_mode=False, snaplen=256):
                 reject those and the reader loop moves on.
       datalink  pcap DLT_* value of the handle when the backend can report it,
                 otherwise None.
-      backend   "pylibpcap" or "pypcap".
+      backend   "pylibpcap", "pypcap" or "pcapy".
 
     Backends, in order of preference:
       1. pylibpcap - the vendored python-libpcap Cython binding used by the
                      Linux, macOS and Docker builds.
       2. pypcap    - the ``pcap`` module (FreeBSD: net/py-pypcap, package
                      py3XX-pypcap). Used when pylibpcap is not installed.
+      3. pcapy     - the ``pcapy`` module (Debian/Devuan/Ubuntu package
+                     python3-pcapy, used by the .deb build). Used when neither
+                     of the above is installed.
     """
     try:
         import pylibpcap.base
@@ -1695,10 +1723,10 @@ def open_capture(network_interface, promisc_mode=False, snaplen=256):
     try:
         import pcap
     except ImportError:
-        raise RuntimeError(
-            "no packet capture backend found: install the vendored python-libpcap "
-            "or pypcap (FreeBSD: pkg install py3XX-pypcap)"
-        )
+        pcap = None
+
+    if pcap is None:
+        return _open_capture_pcapy(network_interface, promisc_mode, snaplen)
 
     sniffer = pcap.pcap(
         name=network_interface,

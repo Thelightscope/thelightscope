@@ -63,14 +63,6 @@ if [ "$BUILT_VERSION" != "$VERSION" ]; then
     exit 1
 fi
 
-# Copy python-libpcap directory for local installation
-if [ -d "python-libpcap" ]; then
-    echo "Copying python-libpcap directory..."
-    cp -r python-libpcap "$BUILD_DIR/opt/lightscope/"
-else
-    echo "Warning: python-libpcap directory not found"
-fi
-
 # Explicitly set the honeypot default in the (throwaway) build copy of the postinst
 # config template. Always set it rather than only flipping yes->no so the result
 # never depends on whatever the template currently says.
@@ -109,6 +101,8 @@ fi
 chmod 755 "$BUILD_DIR/DEBIAN/postinst"
 chmod 755 "$BUILD_DIR/DEBIAN/prerm"
 chmod 755 "$BUILD_DIR/DEBIAN/postrm"
+chmod 644 "$BUILD_DIR/DEBIAN/conffiles"
+chmod 755 "$BUILD_DIR/etc/init.d/lightscope"
 chmod 755 "$BUILD_DIR/opt/lightscope/bin/lightscope-runner.py"
 chmod 644 "$BUILD_DIR/opt/lightscope/bin/lightscope_core.py"
 chmod 644 "$BUILD_DIR/lib/systemd/system/lightscope.service"
@@ -126,7 +120,7 @@ else
 fi
 echo "Creating package: $OUTPUT_FILE"
 
-dpkg-deb --build "$BUILD_DIR" "$OUTPUT_FILE"
+dpkg-deb --root-owner-group --build "$BUILD_DIR" "$OUTPUT_FILE"
 
 echo "Package built successfully: $OUTPUT_FILE"
 

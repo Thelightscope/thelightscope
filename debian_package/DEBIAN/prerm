@@ -7,17 +7,21 @@ SERVICE_NAME="lightscope"
 
 echo "Stopping LightScope service..."
 
-# Stop and disable the service
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-    systemctl stop "$SERVICE_NAME"
-fi
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    # Stop and disable the service
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        systemctl stop "$SERVICE_NAME"
+    fi
 
-if systemctl is-enabled --quiet "$SERVICE_NAME"; then
-    systemctl disable "$SERVICE_NAME"
-fi
+    if systemctl is-enabled --quiet "$SERVICE_NAME"; then
+        systemctl disable "$SERVICE_NAME"
+    fi
 
-systemctl daemon-reload
+    systemctl daemon-reload
+elif [ -x /etc/init.d/lightscope ]; then
+    invoke-rc.d "$SERVICE_NAME" stop || true
+fi
 
 echo "LightScope service stopped and disabled."
 
-exit 0 
+exit 0

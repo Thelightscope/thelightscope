@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=exec
 User=lightscope
 Group=lightscope
-ExecStart=/opt/lightscope/venv/bin/python3 /opt/lightscope/bin/lightscope-runner.py
+ExecStart=/usr/bin/python3 /opt/lightscope/bin/lightscope-runner.py
 ExecReload=/bin/kill -HUP $MAINPID
 WorkingDirectory=/opt/lightscope
 Environment=PYTHONPATH=/opt/lightscope/bin

@@ -11,15 +11,24 @@ case "$1" in
     remove|purge)
         echo "Completely removing LightScope from system..."
         
-        # Ensure service is completely stopped
-        if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-            systemctl stop "$SERVICE_NAME" || true
-        fi
-        
-        # Remove service file if it exists
-        if [ -f "/lib/systemd/system/$SERVICE_NAME.service" ]; then
-            rm -f "/lib/systemd/system/$SERVICE_NAME.service"
-            systemctl daemon-reload || true
+        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+            # Ensure service is completely stopped
+            if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+                systemctl stop "$SERVICE_NAME" || true
+            fi
+
+            # Remove service file if it exists
+            if [ -f "/lib/systemd/system/$SERVICE_NAME.service" ]; then
+                rm -f "/lib/systemd/system/$SERVICE_NAME.service"
+                systemctl daemon-reload || true
+            fi
+        else
+            # sysvinit: stop via the init script if still present, drop rc.d links and pidfile
+            if [ -x /etc/init.d/lightscope ]; then
+                invoke-rc.d "$SERVICE_NAME" stop || true
+            fi
+            update-rc.d -f "$SERVICE_NAME" remove >/dev/null 2>&1 || true
+            rm -f /run/lightscope.pid
         fi
         
         # Remove shared files

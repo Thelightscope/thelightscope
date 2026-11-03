@@ -1,0 +1,91 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          lightscope
+# Required-Start:    $network $remote_fs $syslog
+# Required-Stop:     $network $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: LightScope network security monitor
+# Description:       Passive network sensor and optional honeypot that reports
+#                    to the LightScope cloud platform. Used on sysvinit systems
+#                    (e.g. Devuan); systemd systems use lightscope.service.
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+NAME=lightscope
+DESC="LightScope network security monitor"
+LIGHTSCOPE_HOME=/opt/lightscope
+DAEMON=/usr/bin/python3
+DAEMON_ARGS="$LIGHTSCOPE_HOME/bin/lightscope-runner.py"
+PIDFILE=/run/$NAME.pid
+LOGFILE=$LIGHTSCOPE_HOME/logs/lightscope.log
+
+[ -x "$DAEMON" ] || exit 0
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+. /lib/lsb/init-functions
+
+# Runs as root: packet capture and honeypot port binding need CAP_NET_RAW,
+# CAP_NET_ADMIN and CAP_NET_BIND_SERVICE, which lightscope.service grants via
+# AmbientCapabilities and sysvinit cannot. The working directory must be
+# $LIGHTSCOPE_HOME because the core reads config.ini relative to it.
+do_start() {
+    mkdir -p "$LIGHTSCOPE_HOME/logs"
+    start-stop-daemon --start --quiet --oknodo \
+        --pidfile "$PIDFILE" --make-pidfile --background --no-close \
+        --chdir "$LIGHTSCOPE_HOME" --exec "$DAEMON" -- $DAEMON_ARGS >> "$LOGFILE" 2>&1
+}
+
+# Process group of a pid, from /proc (no procps dependency).
+pgid_of() {
+    sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $3}'
+}
+
+do_stop() {
+    [ -f "$PIDFILE" ] || return 0
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    PGID=$(pgid_of "$PID")
+    # start-stop-daemon --background puts the runner in its own session, so the
+    # worker processes the core forks share its process group. Signal the whole
+    # group, the way systemd's control-group kill does, because the workers do
+    # not exit on a SIGTERM sent to the runner alone. Numeric signals: dash's
+    # builtin kill does not accept "-- -pgid".
+    if [ -n "$PGID" ] && [ "$PGID" != "$(pgid_of $$)" ]; then
+        kill -15 -"$PGID" 2>/dev/null || true
+    fi
+    start-stop-daemon --stop --quiet --oknodo --retry=TERM/30/KILL/5 --pidfile "$PIDFILE"
+    RET=$?
+    if [ -n "$PGID" ] && [ "$PGID" != "$(pgid_of $$)" ]; then
+        kill -9 -"$PGID" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE"
+    return $RET
+}
+
+case "$1" in
+  start)
+    log_daemon_msg "Starting $DESC" "$NAME"
+    do_start
+    log_end_msg $?
+    ;;
+  stop)
+    log_daemon_msg "Stopping $DESC" "$NAME"
+    do_stop
+    log_end_msg $?
+    ;;
+  restart|force-reload)
+    log_daemon_msg "Restarting $DESC" "$NAME"
+    do_stop
+    do_start
+    log_end_msg $?
+    ;;
+  status)
+    status_of_proc -p "$PIDFILE" "$DAEMON" "$NAME" && exit 0 || exit $?
+    ;;
+  *)
+    echo "Usage: /etc/init.d/$NAME {start|stop|restart|force-reload|status}" >&2
+    exit 3
+    ;;
+esac
+
+exit 0
