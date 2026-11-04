@@ -70,13 +70,26 @@ echo ""; ls -la upload/
 # ---- upload + deploy ---------------------------------------------------------------------
 SERVER_USER_HOST="kapitans@lightscope.isi.edu"
 REMOTE_PATH="/var/www/lightscope/latest"
+# accept-new: trust the server's host key on first contact, still refuse a changed one
+SSH_OPTS="-o NumberOfPasswordPrompts=1 -o StrictHostKeyChecking=accept-new"
 
-printf '\nEnter password for %s: ' "$SERVER_USER_HOST"
+# sshpass discards ssh's own messages, so explain its exit codes.
+with_password() {
+    sshpass -p "$SERVER_PASSWORD" "$@" && return 0
+    rc=$?
+    case $rc in
+        5) die "ssh authentication failed: wrong password for $SERVER_USER_HOST" ;;
+        6) die "ssh host key problem for $SERVER_USER_HOST (run: ssh $SERVER_USER_HOST true)" ;;
+        *) die "ssh/scp failed with exit code $rc" ;;
+    esac
+}
+
+printf '\nEnter password for %s (typing is hidden): ' "$SERVER_USER_HOST"
 trap "stty echo" EXIT INT TERM; stty -echo; read -r SERVER_PASSWORD; stty echo; echo ""
 [ -n "$SERVER_PASSWORD" ] || die "no password given"
 
 echo ""; echo "5. Uploading $TARBALL ..."
-sshpass -p "$SERVER_PASSWORD" scp -o NumberOfPasswordPrompts=1 "$TARBALL" "${SERVER_USER_HOST}:~/"
+with_password scp $SSH_OPTS "$TARBALL" "${SERVER_USER_HOST}:~/"
 
 # The tarball carries lightscope_core.py, .sig, version, the public key and
 # both .pkg files, so one archive is all the server needs.
@@ -102,8 +115,8 @@ sudo bash -c "
 "
 EOF
 echo ""; echo "6. Deploying on the server (sudo will ask for your password)..."
-sshpass -p "$SERVER_PASSWORD" scp -o NumberOfPasswordPrompts=1 "$DEPLOY" "${SERVER_USER_HOST}:/tmp/lightscope-deploy.sh"
-sshpass -p "$SERVER_PASSWORD" ssh -t -o NumberOfPasswordPrompts=1 "$SERVER_USER_HOST" \
+with_password scp $SSH_OPTS "$DEPLOY" "${SERVER_USER_HOST}:/tmp/lightscope-deploy.sh"
+with_password ssh -t $SSH_OPTS "$SERVER_USER_HOST" \
     "bash /tmp/lightscope-deploy.sh '$TARBALL' '$VERSION' '$REMOTE_PATH'; rc=\$?; rm -f /tmp/lightscope-deploy.sh; exit \$rc"
 rm -f "$DEPLOY"
 
