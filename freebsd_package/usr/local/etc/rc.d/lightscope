@@ -10,7 +10,8 @@
 #
 # lightscope_enable (bool):     Set to "YES" to start lightscope at boot.
 #                               Default: "NO"
-# lightscope_user (str):        User to run as. Default: "lightscope".
+# lightscope_user (str):        User to run as (rc.subr starts the service with
+#                               su -m as this user). Default: "lightscope".
 #                               Set to "root" if you would rather not grant the
 #                               service group access to /dev/bpf.
 # lightscope_group (str):       Group to run as. Default: "lightscope"
@@ -53,10 +54,13 @@ lightscope_env="LIGHTSCOPE_HOME=${lightscope_home} HOME=${lightscope_home} PYTHO
 #   -r/-R   restart the runner if it exits, after 10 seconds
 #   -o      capture stdout/stderr to the log file
 #   -H      reopen the log file on SIGHUP (newsyslog rotation)
-#   -u      drop privileges to the service user
 #   -P/-p   supervisor and child pid files
+# Privileges are dropped by rc.subr, which runs this whole command as
+# ${lightscope_user} because that variable is its reserved ${name}_user.
+# daemon must therefore NOT be given -u: it would already be unprivileged and
+# the second switch fails in initgroups() with EPERM.
 command="/usr/sbin/daemon"
-command_args="-f -r -R 10 -H -t ${name} -P ${pidfile} -p ${child_pidfile} -u ${lightscope_user} -o ${lightscope_logfile} ${lightscope_python} -u ${lightscope_home}/bin/lightscope-runner.py"
+command_args="-f -r -R 10 -H -t ${name} -P ${pidfile} -p ${child_pidfile} -o ${lightscope_logfile} ${lightscope_python} -u ${lightscope_home}/bin/lightscope-runner.py"
 
 start_precmd="${name}_prestart"
 stop_postcmd="${name}_poststop"

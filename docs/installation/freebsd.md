@@ -69,7 +69,7 @@ env LIGHTSCOPE_NO_AUTOSTART=1 pkg install ./lightscope-<version>.pkg
 ## How it runs
 
 ```
-rc.d/lightscope  ->  daemon(8) -r -u lightscope  ->  python3.11 lightscope-runner.py  ->  lightscope_core (threads + worker processes)
+rc.d/lightscope (su -m lightscope)  ->  daemon(8) -r  ->  python3.11 lightscope-runner.py  ->  lightscope_core (threads + worker processes)
 ```
 
 - `daemon(8)` restarts the runner if it exits (10 s delay) and captures its
@@ -79,7 +79,9 @@ rc.d/lightscope  ->  daemon(8) -r -u lightscope  ->  python3.11 lightscope-runne
 - The runner checks `https://thelightscope.com/latest/version`, downloads
   `lightscope_core.py` plus its signature, verifies it with the bundled public
   key and swaps it in. This is OS-independent and works unchanged.
-- Everything runs as the unprivileged `lightscope` user.
+- Everything runs as the unprivileged `lightscope` user. rc.subr performs the
+  switch (`lightscope_user` is its reserved `${name}_user` variable), so
+  `daemon` is deliberately started without `-u`.
 
 ### Packet capture permissions
 
@@ -165,8 +167,9 @@ device exposed through the jail's devfs ruleset (`add path 'bpf*' unhide mode
 ## Troubleshooting
 
 - **"Permission denied" opening `/dev/bpf`** in the log: the chmod did not
-  run (service started by hand as root with `-u`?) or a devfs ruleset reset
-  it. Run `service lightscope restart`, or install the devfs ruleset.
+  run (daemon started by hand instead of through the rc script?) or a devfs
+  ruleset reset it. Run `service lightscope restart`, or install the devfs
+  ruleset.
 - **`python3.11: not found`**: the package was built for a different Python
   flavor than the one installed. Either install that flavor or
   `sysrc lightscope_python=/usr/local/bin/python3.12`.
