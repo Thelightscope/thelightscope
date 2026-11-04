@@ -34,14 +34,16 @@ if ! python3 -c "import cryptography" 2>/dev/null; then
 fi
 
 echo "1. Checking for signing keys..."
+# Never generate a key here. Every installed LightScope verifies updates against
+# the public key it shipped with; a new pair would make all of them reject updates.
 if [ ! -f "lightscope-private.pem" ] || [ ! -f "lightscope-public.pem" ]; then
-    echo "Generating new RSA key pair..."
-    python3 sign-and-upload.py --generate-keys
-else
-    echo "Using existing key pair:"
-    echo "  - lightscope-private.pem"
-    echo "  - lightscope-public.pem"
+    echo "Error: lightscope-private.pem and lightscope-public.pem are required."
+    echo "       Copy the release signing key into this directory. Never generate a new one."
+    exit 1
 fi
+echo "Using existing key pair:"
+echo "  - lightscope-private.pem"
+echo "  - lightscope-public.pem"
 
 echo ""
 echo "2. Building standard dpkg package (honeypots=yes)..."

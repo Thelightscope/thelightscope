@@ -356,7 +356,7 @@ def main():
                        help="Verify signature after signing")
     parser.add_argument("--no-upload", action="store_true",
                        help="Skip uploading to server via SCP")
-    parser.add_argument("--package-type", choices=["deb", "rpm", "arch", "all"], default="all",
+    parser.add_argument("--package-type", choices=["deb", "rpm", "arch", "freebsd", "all"], default="all",
                        help="Which package type to include (default: all)")
     
     args = parser.parse_args()
@@ -495,6 +495,18 @@ def main():
 
         if not arch_found:
             print(f"Note: Arch Linux package not found")
+
+    # Copy FreeBSD packages (built by build-freebsd-pkg.sh on a FreeBSD host)
+    if args.package_type in ["freebsd", "all"]:
+        freebsd_found = False
+        for name in (f"lightscope-{version}.pkg", f"lightscope-nohoneypot-{version}.pkg"):
+            pkg_file = Path(name)
+            if pkg_file.exists():
+                shutil.copy2(pkg_file, output_dir / pkg_file.name)
+                print(f"Added FreeBSD package: {output_dir / pkg_file.name}")
+                freebsd_found = True
+        if not freebsd_found:
+            print(f"Note: FreeBSD package not found: lightscope-{version}.pkg")
     
     # Create version info
     version_info = create_version_info(output_core, version)
@@ -544,6 +556,8 @@ def main():
         for arch_file in arch_files:
             arch_name = Path(arch_file).name
             print(f"  - {arch_name} (Arch Linux package)")
+    for pkg_file in glob.glob(str(output_dir / f"lightscope*-{version}.pkg")):
+        print(f"  - {Path(pkg_file).name} (FreeBSD package)")
     print("\nArchives created:")
     print(f"  - lightscope_v{version}_upload.tar.gz")
     print(f"  - lightscope_v{version}_upload.zip")
