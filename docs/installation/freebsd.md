@@ -57,8 +57,17 @@ configured FreeBSD repository. The post-install step:
 1. creates the `lightscope` user and group (shell `/usr/sbin/nologin`)
 2. creates `/usr/local/lightscope/{bin,config,logs,updates}`, `/var/log/lightscope`, `/var/run/lightscope`
 3. writes `/usr/local/lightscope/config.ini` with a generated database name (an existing file is kept)
-4. sets `lightscope_enable=YES` in `/etc/rc.conf` and starts the service
+4. sets `lightscope_enable=YES` in `/etc/rc.conf`
 5. prints the dashboard URL
+
+The service is then started by a pkg trigger
+(`/usr/local/share/pkg/triggers/lightscope.ucl`), which pkg runs once the
+transaction is committed. It cannot be started from the post-install script:
+pkg runs install scripts under a process reaper and SIGKILLs every process they
+leave behind, `daemon(8)` included. The trigger runs `service lightscope start`
+if the service is enabled, so an upgrade comes back up by itself as well
+(`+PRE_DEINSTALL` of the old version stops it first). Triggers need pkg 1.17 or
+newer; FreeBSD 14 ships 1.20 and later.
 
 To install without enabling the service:
 
@@ -166,6 +175,9 @@ device exposed through the jail's devfs ruleset (`add path 'bpf*' unhide mode
 
 ## Troubleshooting
 
+- **Not running right after `pkg install`**: the trigger did not fire. Check
+  `pkg -v` is 1.17 or newer and that the install output contains
+  `Running trigger: lightscope.ucl`; otherwise `service lightscope start`.
 - **"Permission denied" opening `/dev/bpf`** in the log: the chmod did not
   run (daemon started by hand instead of through the rc script?) or a devfs
   ruleset reset it. Run `service lightscope restart`, or install the devfs

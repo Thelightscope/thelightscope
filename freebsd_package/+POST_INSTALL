@@ -1,6 +1,8 @@
 #!/bin/sh
 # LightScope post-install: runtime directories, config.ini with a generated
-# database name, and service enable/start.
+# database name, and service enable. The start itself is done by the pkg
+# trigger in @PREFIX@/share/pkg/triggers/lightscope.ucl (see the service
+# section below for why).
 #
 #   LIGHTSCOPE_NO_AUTOSTART=1   do not enable or start the service
 set -e
@@ -100,15 +102,15 @@ elif ! "${PYTHON}" -c "import dpkt, psutil, requests, cryptography, packaging, p
 fi
 
 # ---- service ---------------------------------------------------------------------
+# Enable only. The service must not be started from here: pkg(8) runs install
+# scripts under a process reaper and SIGKILLs every process they leave behind
+# once the script returns, daemon(8) and the runner included. The start is done
+# by the pkg trigger ${PREFIX}/share/pkg/triggers/lightscope.ucl, which pkg
+# runs after the transaction is committed (on upgrades too; the old package's
+# +PRE_DEINSTALL stopped the previous version).
 if [ -z "${LIGHTSCOPE_NO_AUTOSTART:-}" ]; then
 	sysrc -q lightscope_enable=YES >/dev/null
-	if service lightscope onestatus >/dev/null 2>&1; then
-		echo "Restarting LightScope service..."
-		service lightscope restart || echo "WARNING: could not restart lightscope; try: service lightscope restart"
-	else
-		echo "Starting LightScope service..."
-		service lightscope start || echo "WARNING: could not start lightscope; try: service lightscope start"
-	fi
+	echo "Service enabled; pkg starts it when this transaction completes."
 else
 	echo "LIGHTSCOPE_NO_AUTOSTART set: service not enabled. To enable later:"
 	echo "  sysrc lightscope_enable=YES && service lightscope start"

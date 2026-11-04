@@ -96,7 +96,8 @@ done
 chmod 0755 "$STAGE$PREFIX/etc/rc.d/lightscope"
 chmod 0644 "$STAGE$PREFIX/etc/newsyslog.conf.d/lightscope.conf" \
            "$STAGE$PREFIX/share/lightscope/config.ini.sample" \
-           "$STAGE$PREFIX/share/lightscope/devfs.rules.sample"
+           "$STAGE$PREFIX/share/lightscope/devfs.rules.sample" \
+           "$STAGE$PREFIX/share/pkg/triggers/lightscope.ucl"
 
 # Application files: the same core and runner the Linux packages ship
 mkdir -p "$STAGE$LS_HOME/bin" "$STAGE$LS_HOME/config"
@@ -150,6 +151,7 @@ etc/rc.d/lightscope
 etc/newsyslog.conf.d/lightscope.conf
 share/lightscope/config.ini.sample
 share/lightscope/devfs.rules.sample
+share/pkg/triggers/lightscope.ucl
 @mode
 PLIST_EOF
 

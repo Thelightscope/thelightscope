@@ -1,0 +1,20 @@
+# pkg(8) trigger: start LightScope once the package transaction is committed.
+#
+# The service cannot be started from +POST_INSTALL. pkg runs install scripts
+# under a process reaper (procctl PROC_REAP_ACQUIRE) and SIGKILLs every process
+# they leave behind when the script returns, daemon(8) and the runner included.
+# Triggers run after the transaction, outside the reaper, so what they start
+# survives. Matched on this package's own directory, so it fires on install,
+# reinstall and upgrade of lightscope only. Requires pkg 1.17 or newer.
+path: [ "@PREFIX@/lightscope/bin" ]
+trigger: {
+	type: lua
+	sandbox: false
+	script: <<EOS
+-- Start only if enabled (LIGHTSCOPE_NO_AUTOSTART leaves it disabled). The
+-- exit status is ignored: a start problem must not fail the install.
+pkg.exec({"/bin/sh", "-c",
+    "/usr/sbin/service lightscope enabled >/dev/null 2>&1 && /usr/sbin/service lightscope start"})
+return 0
+EOS
+}
