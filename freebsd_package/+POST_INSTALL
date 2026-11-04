@@ -29,16 +29,28 @@ if [ -f "${CONFIG}" ]; then
 	DB_NAME=$(sed -n 's/^database[[:space:]]*=[[:space:]]*//p' "${CONFIG}" | head -1)
 	echo "Keeping existing ${CONFIG}"
 else
+	# $1 random lowercase letters. Reads a bounded amount of /dev/urandom so no
+	# process is left writing into a closed pipe: pkg runs these scripts with
+	# SIGPIPE ignored, and tr(1) then spins forever instead of exiting.
+	rand_letters() {
+		_n=$1; _out=""
+		while [ ${#_out} -lt "$_n" ]; do
+			_out="${_out}$(head -c 4096 /dev/urandom | LC_ALL=C tr -dc 'a-z')"
+		done
+		printf '%s\n' "$_out" | cut -c "1-$_n"
+	}
+
 	TODAY=$(date +%Y%m%d)
 	if [ -f /tmp/.greynoise ] || [ -f "${LS_HOME}/.greynoise" ] || [ -f /root/.greynoise ]; then
 		# GreyNoise mode: gn + date + 45 random chars (56 total)
-		RAND_PART=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 45)
+		RAND_PART=$(rand_letters 45)
 		DB_NAME="gn${TODAY}_${RAND_PART}"
 	else
 		# Standard: date + 47 random chars (56 total)
-		RAND_PART=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 47)
+		RAND_PART=$(rand_letters 47)
 		DB_NAME="${TODAY}_${RAND_PART}"
 	fi
+	[ ${#RAND_PART} -eq 47 ] || [ ${#RAND_PART} -eq 45 ] || { echo "ERROR: could not generate a database name"; exit 1; }
 
 	cat > "${CONFIG}" <<EOF
 [Settings]
