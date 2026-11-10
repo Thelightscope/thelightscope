@@ -29,9 +29,30 @@ import psutil
 import requests
 import copy
 
-ls_version = "1.8.1"
+ls_version = "1.8.2"
 
-print(f"ls_version: {ls_version}")
+# ---------------------------------------------------------------------------
+# Console output policy
+# When LightScope runs as a service, everything written to stdout/stderr is
+# copied into the system journal / syslog. Normal operation is therefore
+# silent: only the report URL, configuration errors and fatal errors are
+# printed. Set LIGHTSCOPE_DEBUG=1 in the service environment to get the full
+# diagnostic output (heartbeats, uploads, honeypot rotation, tracebacks) back.
+# ---------------------------------------------------------------------------
+DEBUG_OUTPUT = os.environ.get("LIGHTSCOPE_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+def debug_print(*args, **kwargs):
+    """print() that only produces output when LIGHTSCOPE_DEBUG is set."""
+    if DEBUG_OUTPUT:
+        print(*args, **kwargs)
+
+def debug_traceback():
+    """traceback.print_exc() that only produces output when LIGHTSCOPE_DEBUG is set."""
+    if DEBUG_OUTPUT:
+        import traceback
+        traceback.print_exc()
+
+debug_print(f"ls_version: {ls_version}")
 
 benchmark_times=[]
 
@@ -521,7 +542,7 @@ class Ports:
                     self.monitored_ipv4_networks.append(net)
                 else:
                     self.monitored_ipv6_networks.append(net)
-                print(f"Restricting monitoring to range/address: {net}")
+                debug_print(f"Restricting monitoring to range/address: {net}")
         self.use_ip_range_whitelist = bool(self.monitored_ipv4_networks or self.monitored_ipv6_networks)
 
         #self.internal_ip_randomized = [ self.randomize_ip(ip) for ip in internal_ips ]
@@ -570,13 +591,13 @@ class Ports:
                         self.interface_human_readable = friendly +self.interface_human_readable
                         break
 
-        print(f"Monitoring {internal_ips} on {self.interface_human_readable}")
+        debug_print(f"Monitoring {internal_ips} on {self.interface_human_readable}")
         
 
 
     def log_local_terminal_and_GUI_WARN(self,event_string,level):
         pass
-        print(event_string, flush=True)
+        debug_print(event_string, flush=True)
 
 
 
@@ -1456,7 +1477,7 @@ def send_honeypot_data(consumer_upload_conn):
                         timeout=10,
                     )
                     if resp.status_code != 200:
-                        print(f"[honeypot] rejected ({to_send} items): {resp.status_code} {resp.text}", flush=True)
+                        debug_print(f"[honeypot] rejected ({to_send} items): {resp.status_code} {resp.text}", flush=True)
                         pass
                     else:
                         ###print(f"[honeypot] flushed {to_send} items successfully", flush=True)
@@ -1465,7 +1486,7 @@ def send_honeypot_data(consumer_upload_conn):
                     last_activity = time.monotonic()
                 except requests.RequestException as e:
                     # push them back on front, and retry later
-                    print(f"[honeypot] error, will retry batch: {e}", flush=True)
+                    debug_print(f"[honeypot] error, will retry batch: {e}", flush=True)
                     for item in reversed(batch):
                         queue.appendleft(item)
                     time.sleep(RETRY_BACKOFF)
@@ -1539,7 +1560,7 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
 
                         )
                         if resp.status_code != 200:
-                            print(f"[heartbeat] rejected ({resp.status_code}): {resp.text}", flush=True)
+                            debug_print(f"[heartbeat] rejected ({resp.status_code}): {resp.text}", flush=True)
                         else:
                             # Try to parse honeypot config from response with robust error handling
                             if shared_honeypot_config is not None:
@@ -1550,7 +1571,7 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
 
                                         # Validate that honeypot_config is a dict
                                         if not isinstance(hp_config, dict):
-                                            print(f"[heartbeat] Invalid honeypot_config type: {type(hp_config)}, expected dict", flush=True)
+                                            debug_print(f"[heartbeat] Invalid honeypot_config type: {type(hp_config)}, expected dict", flush=True)
                                         else:
                                             # Validate and update each field only if it actually changed
                                             changed = False
@@ -1563,7 +1584,7 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                                         shared_honeypot_config['remote_host'] = remote_host.strip()
                                                         changed = True
                                                 else:
-                                                    print(f"[heartbeat] Invalid remote_host: {remote_host}", flush=True)
+                                                    debug_print(f"[heartbeat] Invalid remote_host: {remote_host}", flush=True)
 
                                             # Validate ssh_port (integer, 1-65535)
                                             if 'ssh_port' in hp_config:
@@ -1573,7 +1594,7 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                                         shared_honeypot_config['ssh_port'] = ssh_port
                                                         changed = True
                                                 else:
-                                                    print(f"[heartbeat] Invalid ssh_port: {ssh_port}, must be int 1-65535", flush=True)
+                                                    debug_print(f"[heartbeat] Invalid ssh_port: {ssh_port}, must be int 1-65535", flush=True)
 
                                             # Validate telnet_port (integer, 1-65535)
                                             if 'telnet_port' in hp_config:
@@ -1583,24 +1604,24 @@ def send_data(consumer_upload_conn, shared_honeypot_config=None):
                                                         shared_honeypot_config['telnet_port'] = telnet_port
                                                         changed = True
                                                 else:
-                                                    print(f"[heartbeat] Invalid telnet_port: {telnet_port}, must be int 1-65535", flush=True)
+                                                    debug_print(f"[heartbeat] Invalid telnet_port: {telnet_port}, must be int 1-65535", flush=True)
 
                                             if changed:
-                                                print(f"[heartbeat] Honeypot config changed: host={shared_honeypot_config.get('remote_host')}, ssh={shared_honeypot_config.get('ssh_port')}, telnet={shared_honeypot_config.get('telnet_port')}", flush=True)
+                                                debug_print(f"[heartbeat] Honeypot config changed: host={shared_honeypot_config.get('remote_host')}, ssh={shared_honeypot_config.get('ssh_port')}, telnet={shared_honeypot_config.get('telnet_port')}", flush=True)
 
                                 except (ValueError, TypeError, KeyError) as e:
-                                    print(f"[heartbeat] Error parsing response JSON: {e}", flush=True)
+                                    debug_print(f"[heartbeat] Error parsing response JSON: {e}", flush=True)
                                 except Exception as e:
-                                    print(f"[heartbeat] Unexpected error updating honeypot config: {e}", flush=True)
+                                    debug_print(f"[heartbeat] Unexpected error updating honeypot config: {e}", flush=True)
 
                         resp.raise_for_status()
                     except requests.RequestException as e:
-                        print(f"[heartbeat] error, will drop: {e}", flush=True)
+                        debug_print(f"[heartbeat] error, will drop: {e}", flush=True)
                         pass
                 else:
                     queue.append(item)
             if hb_count:
-                print(f"[heartbeat] sent {hb_count} message(s)", flush=True)
+                debug_print(f"[heartbeat] sent {hb_count} message(s)", flush=True)
                 pass
 
             # 2) now, see if it's time to flush a batch of normal data records
@@ -1820,8 +1841,8 @@ def read_from_interface_mac_linux(network_interface,
     # point-to-point interfaces (wg, tun, gif, lo0 on BSD, ...) use other link
     # types; capturing them would only burn CPU rejecting every frame.
     if datalink is not None and datalink != dpkt.pcap.DLT_EN10MB:
-        print(f"read_from_interface_mac_linux: not capturing on {network_interface}: "
-              f"datalink {datalink} is not Ethernet ({backend})", flush=True)
+        debug_print(f"read_from_interface_mac_linux: not capturing on {network_interface}: "
+                    f"datalink {datalink} is not Ethernet ({backend})", flush=True)
         return
 
     # --------------------------- capture loop ---------------------------
@@ -2062,7 +2083,7 @@ def choose_windows_interface(specific_interfaces=None):
                 sys.exit(1)
 
             result[iface] = ip_info
-            print(f"Using custom interface from config: {iface}")
+            debug_print(f"Using custom interface from config: {iface}")
         return result
 
     # Auto-detect mode (original behavior)
@@ -2173,7 +2194,7 @@ def choose_mac_linux_interface(specific_interfaces=None):
                 sys.exit(1)
 
             result[iface] = {'ipv4': ipv4s, 'ipv6': ipv6s}
-            print(f"Using custom interface from config: {iface} (ipv4={ipv4s}, ipv6={ipv6s})")
+            debug_print(f"Using custom interface from config: {iface} (ipv4={ipv4s}, ipv6={ipv6s})")
         return result
 
     # Auto-detect mode (original behavior)
@@ -2182,7 +2203,7 @@ def choose_mac_linux_interface(specific_interfaces=None):
             continue
 
         if is_virtual_interface(iface):
-            print(f"Skipping virtual interface: {iface}")
+            debug_print(f"Skipping virtual interface: {iface}")
             continue
 
         ipv4s = [
@@ -2326,14 +2347,14 @@ def lightscope_run():
             )
             hp_proc.start()
             hp_uploader.start()
-            print("[+] Honeypots enabled - honeypot worker and uploader started")
+            debug_print("[+] Honeypots enabled - honeypot worker and uploader started")
             # end honeypot
         else:
             # Honeypots disabled - no ports opened, no forwarding, no honeypot data upload
             shared_open_honeypots = []
             shared_honeypot_config = None
             top_unwanted_ports_producer = None
-            print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
+            debug_print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
 
         # helper to spawn the three subprocesses for one interface
         def spawn_for_interface_mac_linux(iface, internal_ips, top_unwanted_ports_producer, shared_open_honeypots, shared_honeypot_config):
@@ -2388,16 +2409,16 @@ def lightscope_run():
         custom_interfaces_str = config_settings.get('interface', '').strip()
         custom_interfaces = [x.strip() for x in custom_interfaces_str.split(',') if x.strip()] if custom_interfaces_str else None
         if custom_interfaces:
-            print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
+            debug_print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
         else:
-            print("[+] No custom interface specified in config - using auto-detection for all interfaces")
+            debug_print("[+] No custom interface specified in config - using auto-detection for all interfaces")
         interfaces_and_ips = choose_mac_linux_interface(custom_interfaces)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
+            debug_print(f"Spawning processes for {iface}: {ips}")
             processes_per_interface[iface] = spawn_for_interface_mac_linux(iface, ips,top_unwanted_ports_producer, shared_open_honeypots, shared_honeypot_config)
 
-        print("Live interfaces:", list(processes_per_interface))
+        debug_print("Live interfaces:", list(processes_per_interface))
 
         # --- monitor loop ---
         while True:
@@ -2405,16 +2426,16 @@ def lightscope_run():
             
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating all interface processes for restart...")
+                debug_print("[+] Update detected! Terminating all interface processes for restart...")
                 # Terminate all interface processes
                 for iface, ctx in processes_per_interface.items():
-                    print(f"[+] Terminating processes for interface {iface}")
+                    debug_print(f"[+] Terminating processes for interface {iface}")
                     for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
                         p = ctx[pname]
                         if p.is_alive():
                             p.terminate()
                             p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting core for update restart.")
+                debug_print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
             
             
@@ -2461,14 +2482,14 @@ def lightscope_run():
             )
             hp_proc.start()
             hp_uploader.start()
-            print("[+] Honeypots enabled - honeypot worker and uploader started")
+            debug_print("[+] Honeypots enabled - honeypot worker and uploader started")
             # end honeypot
         else:
             # Honeypots disabled - no ports opened, no forwarding, no honeypot data upload
             shared_open_honeypots = []
             shared_honeypot_config = None
             top_unwanted_ports_producer = None
-            print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
+            debug_print("[+] Honeypots disabled via config - skipping honeypot worker and uploader")
 
         # helper to spawn the three subprocesses for one interface
         def spawn_for_interface_windows(iface, internal_ips, shared_honeypot_config):
@@ -2523,16 +2544,16 @@ def lightscope_run():
         custom_interfaces_str = config_settings.get('interface', '').strip()
         custom_interfaces = [x.strip() for x in custom_interfaces_str.split(',') if x.strip()] if custom_interfaces_str else None
         if custom_interfaces:
-            print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
+            debug_print(f"[+] Custom interface(s) specified in config: {custom_interfaces}")
         else:
-            print("[+] No custom interface specified in config - using auto-detection for all interfaces")
+            debug_print("[+] No custom interface specified in config - using auto-detection for all interfaces")
         interfaces_and_ips = choose_windows_interface(custom_interfaces)
         processes_per_interface = {}
         for iface, ips in interfaces_and_ips.items():
-            print(f"Spawning processes for {iface}: {ips}")
+            debug_print(f"Spawning processes for {iface}: {ips}")
             processes_per_interface[iface] = spawn_for_interface_windows(iface, ips, shared_honeypot_config)
 
-        print("Live interfaces:", list(processes_per_interface))
+        debug_print("Live interfaces:", list(processes_per_interface))
 
         # --- monitor loop ---
         while True:
@@ -2540,16 +2561,16 @@ def lightscope_run():
 
             # Check if runner has signaled an update is available
             if runner_update_event and runner_update_event.is_set():
-                print("[+] Update detected! Terminating all interface processes for restart...")
+                debug_print("[+] Update detected! Terminating all interface processes for restart...")
                 # Terminate all interface processes
                 for iface, ctx in processes_per_interface.items():
-                    print(f"[+] Terminating processes for interface {iface}")
+                    debug_print(f"[+] Terminating processes for interface {iface}")
                     for pname in ("lightscope_process", "read_from_interface_process", "upload_process"):
                         p = ctx[pname]
                         if p.is_alive():
                             p.terminate()
                             p.join(timeout=1)
-                print("[+] All interface processes terminated. Exiting core for update restart.")
+                debug_print("[+] All interface processes terminated. Exiting core for update restart.")
                 return  # Exit the core so runner can restart with new code
     
 
@@ -2633,11 +2654,11 @@ class configuration_reader:
         env_db_name = os.environ.get('LIGHTSCOPE_DB_NAME', '').strip()
         if existing_db and existing_db.lower() != 'uninitialized':
             # Respect the value already in config.ini so a custom db_id is never overwritten
-            print(f"Using existing database name from config: {existing_db}")
+            debug_print(f"Using existing database name from config: {existing_db}")
         elif env_db_name:
             # Seed from the environment (systemd service) only when config has no value yet
             config['Settings']['database'] = env_db_name
-            print(f"Using database name from environment: {env_db_name}")
+            debug_print(f"Using database name from environment: {env_db_name}")
         else:
             # Generate new database name only if neither config nor environment provides one
             today = datetime.date.today().strftime("%Y%m%d")        # 8 chars
@@ -2654,50 +2675,50 @@ class configuration_reader:
                 rand_len = max_len - len(today) - 3        # "-3" for "gn" and underscore
                 rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
                 config['Settings']['database'] = f"gn{today}_{rand_part}"
-                print(f"Database not found; generated GreyNoise database name: {config['Settings']['database']}")
+                debug_print(f"Database not found; generated GreyNoise database name: {config['Settings']['database']}")
             else:
                 # Standard format: date + 47 random chars (total 56 chars: 8+1+47)
                 max_len = 63                               # leave room under 64
                 rand_len = max_len - len(today) - 1        # "-1" for the underscore
                 rand_part = ''.join(random.choices(string.ascii_lowercase, k=rand_len))
                 config['Settings']['database'] = f"{today}_{rand_part}"
-                print(f"Database not found; generated random database name: {config['Settings']['database']}")
+                debug_print(f"Database not found; generated random database name: {config['Settings']['database']}")
 
 
         # Check for the 'randomization_key' option.
         if 'randomization_key' not in config['Settings'] or not config['Settings']['randomization_key'].strip():
             randomization_key="randomization_key_"+''.join(random.choices(string.ascii_lowercase, k=46))
             config['Settings']['randomization_key'] = randomization_key
-            print(f"randomization_key not found; generated random randomization_key name: {randomization_key}")
+            debug_print(f"randomization_key not found; generated random randomization_key name: {randomization_key}")
 
 
         # Check for the 'self_telnet_and_ssh_honeypot_ports_to_forward' option.
         if 'self_telnet_and_ssh_honeypot_ports_to_forward' not in config['Settings'] or not config['Settings']['self_telnet_and_ssh_honeypot_ports_to_forward'].strip():
             self_telnet_and_ssh_honeypot_ports_to_forward="no"
             config['Settings']['self_telnet_and_ssh_honeypot_ports_to_forward'] = self_telnet_and_ssh_honeypot_ports_to_forward
-            print(f"self_telnet_and_ssh_honeypot_ports_to_forward not found; generated : {self_telnet_and_ssh_honeypot_ports_to_forward}")
+            debug_print(f"self_telnet_and_ssh_honeypot_ports_to_forward not found; generated : {self_telnet_and_ssh_honeypot_ports_to_forward}")
 
         # Check for the 'autoupdate' option.
         if 'autoupdate' not in config['Settings'] or not config['Settings']['autoupdate'].strip():
             autoupdate="yes"
             config['Settings']['autoupdate'] = autoupdate
-            print(f"autoupdate not found; set to: {autoupdate}")
+            debug_print(f"autoupdate not found; set to: {autoupdate}")
 
         # Check for the 'honeypots' option.
         if 'honeypots' not in config['Settings'] or not config['Settings']['honeypots'].strip():
             honeypots="yes"
             config['Settings']['honeypots'] = honeypots
-            print(f"honeypots not found; set to: {honeypots}")
+            debug_print(f"honeypots not found; set to: {honeypots}")
 
         # Check for the 'interface' option.
         if 'interface' not in config['Settings']:
             config['Settings']['interface'] = ""
-            print(f"interface not found; set to empty (auto-detection enabled)")
+            debug_print(f"interface not found; set to empty (auto-detection enabled)")
 
         # Check for the 'monitored_ip_ranges' option.
         if 'monitored_ip_ranges' not in config['Settings']:
             config['Settings']['monitored_ip_ranges'] = ""
-            print(f"monitored_ip_ranges not found; set to empty (auto-detected interface IPs will be used)")
+            debug_print(f"monitored_ip_ranges not found; set to empty (auto-detected interface IPs will be used)")
 
 
         # Write the configuration back to the file.
@@ -2723,9 +2744,9 @@ class configuration_reader:
                         f.write('# Example: monitored_ip_ranges = 192.168.1.0/24, 10.0.0.0/8, 2001:db8::/32\n')
                     f.write(line)
         except Exception as e:
-            print(f"Note: Could not add comment to interface field: {e}")
+            debug_print(f"Note: Could not add comment to interface field: {e}")
         
-        print(f"Configuration updated and saved to {config_file}")
+        debug_print(f"Configuration updated and saved to {config_file}")
         
 
 
@@ -3217,7 +3238,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 ###print(f"_honeypot_worker: Rotation complete. Active sockets: {len(sockets)}", flush=True)
             except Exception as e:
                 ###print(f"_honeypot_worker: Error in rotate_honeypots: {e}", flush=True)
-                traceback.print_exc()
+                debug_traceback()
 
         ###print(f"_honeypot_worker: Starting main loop", flush=True)
         
@@ -3263,7 +3284,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                 
                 # Auto-rotate every 4 hours (standard mode only)
                 if not nrp_mode and now >= next_rotation:
-                    print(f"\n\n _honeypot_worker: Rotating honeypots\n\n", flush=True)
+                    debug_print(f"\n\n _honeypot_worker: Rotating honeypots\n\n", flush=True)
                     rotate_honeypots()
                     next_rotation = now + 4 * 60 * 60  # Rotate every 4 hours
 
@@ -3381,7 +3402,7 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                         ###print(f"_honeypot_worker: Sent honeypot data for {addr[0]}:{addr[1]} -> {port} ({svc})", flush=True)
                                     except Exception as e:
                                         ###print(f"_honeypot_worker: Failed to send honeypot data: {e}", flush=True)
-                                        traceback.print_exc()
+                                        debug_traceback()
 
                                     ###print(f"_honeypot_worker: proxied {addr[0]}:{addr[1]} → {remote_host}:{connect_port} ({svc})", flush=True)
                                 else:
@@ -3390,16 +3411,16 @@ def _honeypot_worker(top_unwanted_ports_consumer, shared_open_honeypots, hp_uplo
                                     ###print(f"_honeypot_worker: Closed connection from {addr[0]}:{addr[1]} to port {port} (unsupported service)", flush=True)
                             except Exception as e:
                                 ###print(f"_honeypot_worker: Error handling connection: {e}", flush=True)
-                                traceback.print_exc()
+                                debug_traceback()
                     except Exception as e:
                         ###print(f"_honeypot_worker: Error in select loop: {e}", flush=True)
-                        traceback.print_exc()
+                        debug_traceback()
                 else:
                     time.sleep(1.0)
                     
             except Exception as e:
                 ###print(f"_honeypot_worker: Error in main loop: {e}", flush=True)
-                traceback.print_exc()
+                debug_traceback()
                 time.sleep(1.0)  # Prevent tight error loop
 
     except Exception as e:
@@ -3415,7 +3436,7 @@ def cleanup_orphaned_processes():
     try:
         current_pid = os.getpid()
         parent_pid = os.getppid()  # Get parent PID (the runner)
-        print(f"Cleaning up orphaned processes (current PID: {current_pid}, parent PID: {parent_pid})...")
+        debug_print(f"Cleaning up orphaned processes (current PID: {current_pid}, parent PID: {parent_pid})...")
         
         # Get current username
         current_username = psutil.Process(current_pid).username()
@@ -3423,7 +3444,7 @@ def cleanup_orphaned_processes():
         # PIDs to preserve: ourselves and our parent (the runner that spawned us)
         preserve_pids = {current_pid, parent_pid}
         
-        print(f"Will preserve PIDs: {preserve_pids}")
+        debug_print(f"Will preserve PIDs: {preserve_pids}")
         
         killed_count = 0
         for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'username']):
@@ -3453,13 +3474,13 @@ def cleanup_orphaned_processes():
                 # If it's a Python process owned by lightscope user with lightscope-runner in cmdline,
                 # and it's NOT in our preserve list, it's an orphan - kill it!
                 if 'lightscope-runner' in cmdline_str.lower():
-                    print(f"Found orphaned LightScope process: PID {pid}, cmdline: {cmdline_str[:100]}")
+                    debug_print(f"Found orphaned LightScope process: PID {pid}, cmdline: {cmdline_str[:100]}")
                     proc.terminate()
                     try:
                         proc.wait(timeout=5)
-                        print(f"  Successfully terminated PID {pid}")
+                        debug_print(f"  Successfully terminated PID {pid}")
                     except psutil.TimeoutExpired:
-                        print(f"  Process {pid} didn't terminate, killing forcefully...")
+                        debug_print(f"  Process {pid} didn't terminate, killing forcefully...")
                         proc.kill()
                         proc.wait(timeout=2)
                     killed_count += 1
@@ -3468,18 +3489,18 @@ def cleanup_orphaned_processes():
                 # Process died or we can't access it
                 continue
             except Exception as e:
-                print(f"Error processing PID {pid}: {e}")
+                debug_print(f"Error processing PID {pid}: {e}")
                 continue
         
         if killed_count > 0:
-            print(f"Cleaned up {killed_count} orphaned process(es)")
+            debug_print(f"Cleaned up {killed_count} orphaned process(es)")
         else:
-            print("No orphaned processes found")
+            debug_print("No orphaned processes found")
             
     except Exception as e:
-        print(f"Error during orphaned process cleanup: {e}")
+        debug_print(f"Error during orphaned process cleanup: {e}")
         import traceback
-        traceback.print_exc()
+        debug_traceback()
         # Don't fail startup if cleanup fails
 if __name__ == '__main__':
     import multiprocessing
